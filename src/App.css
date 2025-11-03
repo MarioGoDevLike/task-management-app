@@ -1,0 +1,135 @@
+.App {
+  text-align: center;
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.App-header {
+  background-color: #282c34;
+  padding: 20px;
+  color: white;
+  border-radius: 10px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+h1 {
+  margin-bottom: 30px;
+  font-size: 2.5rem;
+  color: #61dafb;
+}
+
+.task-input {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 30px;
+  justify-content: center;
+}
+
+.task-input input {
+  flex: 1;
+  max-width: 400px;
+  padding: 12px;
+  border: none;
+  border-radius: 5px;
+  font-size: 16px;
+  outline: none;
+}
+
+.task-input button {
+  padding: 12px 24px;
+  background-color: #61dafb;
+  color: #282c34;
+  border: none;
+  border-radius: 5px;
+  font-size: 16px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.task-input button:hover {
+  background-color: #21a0c4;
+}
+
+.task-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.task-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background-color: #3a3f4a;
+  padding: 15px;
+  border-radius: 8px;
+  transition: all 0.3s;
+}
+
+.task-item:hover {
+  background-color: #4a4f5a;
+}
+
+.task-item.completed {
+  opacity: 0.6;
+}
+
+.task-text {
+  flex: 1;
+  text-align: left;
+  cursor: pointer;
+  padding: 5px;
+  border-radius: 3px;
+  transition: background-color 0.2s;
+}
+
+.task-text:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.task-item.completed .task-text {
+  text-decoration: line-through;
+  color: #888;
+}
+
+.delete-btn {
+  background-color: #ff4757;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background-color 0.3s;
+}
+
+.delete-btn:hover {
+  background-color: #ff3742;
+}
+
+.no-tasks {
+  color: #888;
+  font-style: italic;
+  margin-top: 20px;
+}
+
+@media (max-width: 600px) {
+  .App {
+    padding: 10px;
+  }
+  
+  .task-input {
+    flex-direction: column;
+  }
+  
+  .task-input input {
+    max-width: none;
+  }
+  
+  h1 {
+    font-size: 2rem;
+  }
+}
