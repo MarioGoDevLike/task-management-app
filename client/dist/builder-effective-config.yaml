@@ -1,0 +1,16 @@
+directories:
+  output: dist
+  buildResources: build
+appId: com.taskmanager.desktop
+asar: true
+files:
+  - filter:
+      - dist/**
+      - electron/**
+      - index.html
+      - src/**
+      - vite.config.js
+      - package.json
+win:
+  target: nsis
+electronVersion: 33.4.11

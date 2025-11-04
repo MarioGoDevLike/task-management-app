@@ -1,5 +1,12 @@
 const mongoose = require('mongoose');
 
+const taskHistorySchema = new mongoose.Schema({
+  action: { type: String, required: true }, // created, updated, archived, restored
+  timestamp: { type: Date, default: Date.now },
+  actor: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  changes: { type: Object }
+}, { _id: false });
+
 const taskSchema = new mongoose.Schema({
   title: {
     type: String,
@@ -8,9 +15,7 @@ const taskSchema = new mongoose.Schema({
     maxlength: [200, 'Task title cannot exceed 200 characters']
   },
   description: {
-    type: String,
-    trim: true,
-    maxlength: [1000, 'Task description cannot exceed 1000 characters']
+    type: String
   },
   status: {
     type: String,
@@ -48,7 +53,8 @@ const taskSchema = new mongoose.Schema({
   completedAt: {
     type: Date,
     default: null
-  }
+  },
+  history: [taskHistorySchema]
 }, {
   timestamps: true
 });

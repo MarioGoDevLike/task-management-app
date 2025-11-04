@@ -4,140 +4,40 @@ import { useForm } from 'react-hook-form';
 import { authAPI } from '../services/api';
 import { toast } from 'react-hot-toast';
 
-const RegisterContainer = styled.div`
+const Container = styled.div`
   min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
-  padding: 20px;
-  position: relative;
-  overflow: hidden;
-
-  &::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><pattern id="grain" width="100" height="100" patternUnits="userSpaceOnUse"><circle cx="25" cy="25" r="1" fill="rgba(255,255,255,0.1)"/><circle cx="75" cy="75" r="1" fill="rgba(255,255,255,0.1)"/><circle cx="50" cy="10" r="0.5" fill="rgba(255,255,255,0.05)"/><circle cx="10" cy="60" r="0.5" fill="rgba(255,255,255,0.05)"/><circle cx="90" cy="40" r="0.5" fill="rgba(255,255,255,0.05)"/></pattern></defs><rect width="100" height="100" fill="url(%23grain)"/></svg>');
-    opacity: 0.3;
-  }
+  background: #fafbfc;
+  padding: 24px;
 `;
 
-const RegisterCard = styled.div`
-  background: rgba(255, 255, 255, 0.95);
-  backdrop-filter: blur(20px);
-  border-radius: 24px;
-  box-shadow: 
-    0 32px 64px rgba(0, 0, 0, 0.2),
-    0 0 0 1px rgba(255, 255, 255, 0.1),
-    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+const Card = styled.div`
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03), 0 2px 4px rgba(0, 0, 0, 0.03);
   padding: 48px;
   width: 100%;
-  max-width: 480px;
-  position: relative;
-  overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-
-  &::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 4px;
-    background: linear-gradient(90deg, #667eea, #764ba2, #f093fb);
-    border-radius: 24px 24px 0 0;
-  }
-
-  &::after {
-    content: '';
-    position: absolute;
-    top: -50%;
-    left: -50%;
-    width: 200%;
-    height: 200%;
-    background: radial-gradient(circle, rgba(102, 126, 234, 0.1) 0%, transparent 70%);
-    animation: float 6s ease-in-out infinite;
-  }
-
-  @keyframes float {
-    0%, 100% { transform: translateY(0px) rotate(0deg); }
-    50% { transform: translateY(-20px) rotate(180deg); }
-  }
+  max-width: 500px;
+  border: 1px solid #e8ecf0;
 `;
 
 const Logo = styled.div`
-  text-align: center;
-  margin-bottom: 30px;
-`;
-
-const LogoIcon = styled.div`
-  width: 80px;
-  height: 80px;
-  background: linear-gradient(135deg, #667eea, #764ba2, #f093fb);
-  border-radius: 50%;
-  margin: 0 auto 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 32px;
-  color: white;
-  font-weight: bold;
-  box-shadow: 
-    0 8px 32px rgba(102, 126, 234, 0.4),
-    inset 0 1px 0 rgba(255, 255, 255, 0.2);
-  animation: pulse 2s ease-in-out infinite;
-  position: relative;
-  z-index: 1;
-
-  @keyframes pulse {
-    0%, 100% { transform: scale(1); }
-    50% { transform: scale(1.05); }
+  margin-bottom: 32px;
+  
+  h1 {
+    font-size: 28px;
+    font-weight: 600;
+    color: #0f172a;
+    margin: 0 0 8px 0;
   }
 
-  &::before {
-    content: '';
-    position: absolute;
-    top: -4px;
-    left: -4px;
-    right: -4px;
-    bottom: -4px;
-    background: linear-gradient(135deg, #667eea, #764ba2, #f093fb);
-    border-radius: 50%;
-    z-index: -1;
-    opacity: 0.3;
-    animation: rotate 3s linear infinite;
+  p {
+    color: #64748b;
+    font-size: 14px;
+    margin: 0;
   }
-
-  @keyframes rotate {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
-  }
-`;
-
-const Title = styled.h1`
-  font-size: 32px;
-  font-weight: 800;
-  background: linear-gradient(135deg, #667eea, #764ba2, #f093fb);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  margin: 0;
-  text-align: center;
-  position: relative;
-  z-index: 1;
-`;
-
-const Subtitle = styled.p`
-  color: #718096;
-  font-size: 16px;
-  margin: 12px 0 0;
-  text-align: center;
-  position: relative;
-  z-index: 1;
 `;
 
 const Form = styled.form`
@@ -149,7 +49,7 @@ const Form = styled.form`
 const FormRow = styled.div`
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 15px;
+  gap: 16px;
 
   @media (max-width: 480px) {
     grid-template-columns: 1fr;
@@ -163,170 +63,123 @@ const FormGroup = styled.div`
 `;
 
 const Label = styled.label`
-  font-weight: 600;
-  color: #2d3748;
+  font-weight: 500;
+  color: #334155;
   font-size: 14px;
 `;
 
 const Input = styled.input`
-  padding: 16px 20px;
-  border: 2px solid rgba(226, 232, 240, 0.8);
-  border-radius: 16px;
-  font-size: 16px;
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-  background: rgba(247, 250, 252, 0.8);
-  backdrop-filter: blur(10px);
-  position: relative;
-  z-index: 1;
+  padding: 14px 16px;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 12px;
+  font-size: 15px;
+  transition: all 0.15s ease;
+  color: #0f172a;
+  background: #fafbfc;
 
   &:focus {
     outline: none;
-    border-color: #667eea;
-    background: rgba(255, 255, 255, 0.95);
-    box-shadow: 
-      0 0 0 4px rgba(102, 126, 234, 0.15),
-      0 8px 32px rgba(102, 126, 234, 0.2);
-    transform: translateY(-2px);
+    border-color: #3b82f6;
+    background: white;
+    box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.08);
   }
 
   &:hover {
-    border-color: rgba(102, 126, 234, 0.5);
-    background: rgba(255, 255, 255, 0.9);
-    transform: translateY(-1px);
+    border-color: #cbd5e1;
   }
 
   &::placeholder {
-    color: #a0aec0;
-    font-weight: 500;
+    color: #94a3b8;
   }
 
   ${props => props.error && `
-    border-color: #e53e3e;
-    background: rgba(254, 215, 215, 0.8);
-    box-shadow: 0 0 0 4px rgba(229, 62, 62, 0.15);
+    border-color: #ef4444;
+    background: #fef2f2;
+    
+    &:focus {
+      box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.08);
+    }
   `}
 `;
 
 const ErrorMessage = styled.span`
-  color: #e53e3e;
-  font-size: 14px;
-  font-weight: 500;
+  color: #ef4444;
+  font-size: 13px;
+  margin-top: -4px;
 `;
 
 const Button = styled.button`
-  background: linear-gradient(135deg, #667eea, #764ba2, #f093fb);
+  background: #3b82f6;
   color: white;
   border: none;
-  padding: 16px 24px;
-  border-radius: 16px;
-  font-size: 16px;
-  font-weight: 700;
+  padding: 14px 20px;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 600;
   cursor: pointer;
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-  margin-top: 16px;
-  position: relative;
-  z-index: 1;
-  box-shadow: 
-    0 8px 32px rgba(102, 126, 234, 0.3),
-    inset 0 1px 0 rgba(255, 255, 255, 0.2);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  transition: all 0.15s ease;
+  margin-top: 8px;
 
   &:hover:not(:disabled) {
-    transform: translateY(-3px);
-    box-shadow: 
-      0 16px 48px rgba(102, 126, 234, 0.4),
-      inset 0 1px 0 rgba(255, 255, 255, 0.3);
-    background: linear-gradient(135deg, #5a67d8, #6b46c1, #ec4899);
+    background: #2563eb;
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
   }
 
   &:active:not(:disabled) {
-    transform: translateY(-1px);
-    box-shadow: 
-      0 8px 24px rgba(102, 126, 234, 0.3),
-      inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    transform: translateY(0);
   }
 
   &:disabled {
-    opacity: 0.6;
+    opacity: 0.5;
     cursor: not-allowed;
-    transform: none;
-    box-shadow: 0 4px 16px rgba(102, 126, 234, 0.2);
-  }
-
-  &::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: linear-gradient(135deg, #667eea, #764ba2, #f093fb);
-    border-radius: 16px;
-    z-index: -1;
-    opacity: 0;
-    transition: opacity 0.3s ease;
-  }
-
-  &:hover:not(:disabled)::before {
-    opacity: 1;
-  }
-`;
-
-const Divider = styled.div`
-  display: flex;
-  align-items: center;
-  margin: 20px 0;
-  
-  &::before,
-  &::after {
-    content: '';
-    flex: 1;
-    height: 1px;
-    background: #e2e8f0;
-  }
-  
-  span {
-    padding: 0 15px;
-    color: #718096;
-    font-size: 14px;
   }
 `;
 
 const LinkButton = styled.button`
   background: none;
   border: none;
-  color: #667eea;
-  font-size: 16px;
-  font-weight: 600;
+  color: #3b82f6;
+  font-size: 14px;
+  font-weight: 500;
   cursor: pointer;
-  text-decoration: none;
-  padding: 12px 24px;
+  text-align: left;
   margin-top: 24px;
-  border-radius: 12px;
-  transition: all 0.3s ease;
-  position: relative;
-  z-index: 1;
+  padding: 8px 0;
 
   &:hover {
-    color: #764ba2;
-    background: rgba(102, 126, 234, 0.1);
-    transform: translateY(-1px);
+    color: #2563eb;
+    text-decoration: underline;
   }
+`;
 
-  &:active {
-    transform: translateY(0);
+const Divider = styled.div`
+  display: flex;
+  align-items: center;
+  margin: 24px 0;
+  
+  &::before,
+  &::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: #e8ecf0;
+  }
+  
+  span {
+    padding: 0 16px;
+    color: #94a3b8;
+    font-size: 13px;
   }
 `;
 
 const LoadingSpinner = styled.div`
   display: inline-block;
-  width: 20px;
-  height: 20px;
-  border: 2px solid #ffffff;
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
   border-radius: 50%;
-  border-top-color: transparent;
-  animation: spin 1s ease-in-out infinite;
+  border-top-color: white;
+  animation: spin 0.8s linear infinite;
 
   @keyframes spin {
     to { transform: rotate(360deg); }
@@ -348,7 +201,7 @@ const RegisterPage = ({ onRegister, onSwitchToLogin }) => {
       localStorage.setItem('token', token);
       localStorage.setItem('user', JSON.stringify(user));
       
-      toast.success('Registration successful!');
+      toast.success('Account created successfully!');
       onRegister(user);
     } catch (error) {
       const message = error.response?.data?.message || 'Registration failed. Please try again.';
@@ -359,12 +212,11 @@ const RegisterPage = ({ onRegister, onSwitchToLogin }) => {
   };
 
   return (
-    <RegisterContainer>
-      <RegisterCard>
+    <Container>
+      <Card>
         <Logo>
-          <LogoIcon>✓</LogoIcon>
-          <Title>Create Account</Title>
-          <Subtitle>Join us to get started</Subtitle>
+          <h1>Create Account</h1>
+          <p>Sign up to get started with task management</p>
         </Logo>
 
         <Form onSubmit={handleSubmit(onSubmit)}>
@@ -407,11 +259,11 @@ const RegisterPage = ({ onRegister, onSwitchToLogin }) => {
           </FormRow>
 
           <FormGroup>
-            <Label htmlFor="email">Email Address</Label>
+            <Label htmlFor="email">Email</Label>
             <Input
               id="email"
               type="email"
-              placeholder="john@example.com"
+              placeholder="you@example.com"
               {...register('email', {
                 required: 'Email is required',
                 pattern: {
@@ -429,7 +281,7 @@ const RegisterPage = ({ onRegister, onSwitchToLogin }) => {
             <Input
               id="password"
               type="password"
-              placeholder="Create a password"
+              placeholder="Minimum 6 characters"
               {...register('password', {
                 required: 'Password is required',
                 minLength: {
@@ -447,7 +299,7 @@ const RegisterPage = ({ onRegister, onSwitchToLogin }) => {
             <Input
               id="confirmPassword"
               type="password"
-              placeholder="Confirm your password"
+              placeholder="Re-enter your password"
               {...register('confirmPassword', {
                 required: 'Please confirm your password',
                 validate: value => value === password || 'Passwords do not match'
@@ -463,14 +315,14 @@ const RegisterPage = ({ onRegister, onSwitchToLogin }) => {
         </Form>
 
         <Divider>
-          <span>or</span>
+          <span>Already have an account?</span>
         </Divider>
 
         <LinkButton onClick={onSwitchToLogin}>
-          Already have an account? Sign in
+          Sign in
         </LinkButton>
-      </RegisterCard>
-    </RegisterContainer>
+      </Card>
+    </Container>
   );
 };
 

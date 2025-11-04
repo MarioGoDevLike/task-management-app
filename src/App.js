@@ -1,22 +1,33 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import LoginPage from './components/LoginPage';
+import RegisterPage from './components/RegisterPage';
 import ProtectedRoute from './components/ProtectedRoute';
 import TaskManagement from './components/TaskManagement';
 import './App.css';
 
 const AppContent = () => {
-  const { isAuthenticated, isLoading, login } = useAuth();
+  const { isAuthenticated, isLoading, login, register } = useAuth();
+  const [showRegister, setShowRegister] = useState(false);
 
   if (isLoading) {
     return null; // Loading handled by ProtectedRoute
   }
 
   if (!isAuthenticated) {
+    if (showRegister) {
+      return (
+        <RegisterPage 
+          onRegister={register}
+          onSwitchToLogin={() => setShowRegister(false)}
+        />
+      );
+    }
     return (
       <LoginPage 
         onLogin={login} 
+        onSwitchToRegister={() => setShowRegister(true)}
       />
     );
   }

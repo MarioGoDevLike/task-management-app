@@ -52,10 +52,7 @@ router.post('/', [
     .isLength({ min: 1, max: 200 })
     .withMessage('Title is required and must be less than 200 characters'),
   body('description')
-    .optional()
-    .trim()
-    .isLength({ max: 1000 })
-    .withMessage('Description must be less than 1000 characters'),
+    .optional({ values: 'falsy' }),
   body('priority')
     .optional()
     .isIn(['low', 'medium', 'high', 'urgent'])
@@ -76,7 +73,8 @@ router.post('/', [
 
     const task = new Task({
       ...req.body,
-      user: req.user._id
+      user: req.user._id,
+      history: [{ action: 'created', actor: req.user._id, changes: req.body }]
     });
 
     await task.save();
@@ -116,10 +114,7 @@ router.put('/:id', [
     .isLength({ min: 1, max: 200 })
     .withMessage('Title must be less than 200 characters'),
   body('description')
-    .optional()
-    .trim()
-    .isLength({ max: 1000 })
-    .withMessage('Description must be less than 1000 characters'),
+    .optional({ values: 'falsy' }),
   body('status')
     .optional()
     .isIn(['pending', 'in-progress', 'completed', 'cancelled'])
@@ -138,15 +133,25 @@ router.put('/:id', [
       });
     }
 
-    const task = await Task.findOneAndUpdate(
-      { _id: req.params.id, user: req.user._id },
-      req.body,
-      { new: true, runValidators: true }
-    );
-    
-    if (!task) {
+    const existing = await Task.findOne({ _id: req.params.id, user: req.user._id });
+    if (!existing) {
       return res.status(404).json({ message: 'Task not found' });
     }
+
+    const updates = req.body;
+    const changes = {};
+    for (const k of Object.keys(updates)) {
+      if (String(existing[k]) !== String(updates[k])) {
+        changes[k] = { from: existing[k], to: updates[k] };
+        existing[k] = updates[k];
+      }
+    }
+
+    if (Object.keys(changes).length > 0) {
+      existing.history.push({ action: 'updated', actor: req.user._id, changes });
+    }
+
+    const task = await existing.save();
     
     res.json(task);
   } catch (error) {
@@ -160,17 +165,50 @@ router.put('/:id', [
 // @access  Private
 router.delete('/:id', auth, async (req, res) => {
   try {
-    const task = await Task.findOneAndDelete({ _id: req.params.id, user: req.user._id });
-    
+    const task = await Task.findOne({ _id: req.params.id, user: req.user._id });
     if (!task) {
       return res.status(404).json({ message: 'Task not found' });
     }
-    
-    res.json({ message: 'Task deleted successfully' });
+    if (!task.isArchived) {
+      task.isArchived = true;
+      task.history.push({ action: 'archived', actor: req.user._id });
+      await task.save();
+    }
+    res.json({ message: 'Task archived successfully' });
   } catch (error) {
-    console.error('Delete task error:', error);
+    console.error('Archive task error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Restore archived task
+router.post('/:id/restore', auth, async (req, res) => {
+  try {
+    const task = await Task.findOne({ _id: req.params.id, user: req.user._id });
+    if (!task) return res.status(404).json({ message: 'Task not found' });
+    if (task.isArchived) {
+      task.isArchived = false;
+      task.history.push({ action: 'restored', actor: req.user._id });
+      await task.save();
+    }
+    res.json(task);
+  } catch (error) {
+    console.error('Restore task error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Task history
+router.get('/:id/history', auth, async (req, res) => {
+  try {
+    const task = await Task.findOne({ _id: req.params.id, user: req.user._id }).select('history');
+    if (!task) return res.status(404).json({ message: 'Task not found' });
+    res.json({ history: task.history });
+  } catch (error) {
+    console.error('Get history error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
 module.exports = router;
+
