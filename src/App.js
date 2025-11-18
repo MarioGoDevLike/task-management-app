@@ -1,40 +1,40 @@
 import React, { useState } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import LoginPage from './components/LoginPage';
-import RegisterPage from './components/RegisterPage';
 import ProtectedRoute from './components/ProtectedRoute';
 import TaskManagement from './components/TaskManagement';
+import SettingsPage from './components/SettingsPage';
+import AdminDashboard from './components/AdminDashboard';
+import DashboardLayout from './components/DashboardLayout';
 import './App.css';
 
 const AppContent = () => {
-  const { isAuthenticated, isLoading, login, register } = useAuth();
-  const [showRegister, setShowRegister] = useState(false);
+  const { isAuthenticated, isLoading, login } = useAuth();
 
   if (isLoading) {
     return null; // Loading handled by ProtectedRoute
   }
 
   if (!isAuthenticated) {
-    if (showRegister) {
-      return (
-        <RegisterPage 
-          onRegister={register}
-          onSwitchToLogin={() => setShowRegister(false)}
-        />
-      );
-    }
     return (
       <LoginPage 
-        onLogin={login} 
-        onSwitchToRegister={() => setShowRegister(true)}
+        onLogin={login}
       />
     );
   }
 
   return (
     <ProtectedRoute>
-      <TaskManagement />
+      <Routes>
+        <Route element={<DashboardLayout />}>
+          <Route path="/" element={<TaskManagement />} />
+          <Route path="/admin" element={<AdminDashboard />} />
+          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Route>
+      </Routes>
     </ProtectedRoute>
   );
 };
@@ -42,6 +42,7 @@ const AppContent = () => {
 function App() {
   return (
     <AuthProvider>
+      <Router>
       <div className="App">
         <AppContent />
         <Toaster 
@@ -73,6 +74,7 @@ function App() {
           }}
         />
       </div>
+      </Router>
     </AuthProvider>
   );
 }

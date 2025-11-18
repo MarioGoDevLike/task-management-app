@@ -1,6 +1,8 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
+const ROLE_VALUES = ['admin', 'manager', 'member'];
+
 const userSchema = new mongoose.Schema({
   email: {
     type: String,
@@ -42,7 +44,27 @@ const userSchema = new mongoose.Schema({
   lockUntil: {
     type: Date,
     default: null
-  }
+  },
+  roles: {
+    type: [{
+      type: String,
+      enum: ROLE_VALUES,
+    }],
+    default: ['member'],
+    validate: {
+      validator: function(value) {
+        return value.length > 0;
+      },
+      message: 'At least one role must be assigned to the user.'
+    }
+  },
+  teams: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Team'
+  }],
+  customPermissions: [{
+    type: String
+  }] // Additional permissions beyond team permissions
 }, {
   timestamps: true
 });
@@ -108,7 +130,12 @@ userSchema.methods.toJSON = function() {
   delete userObject.password;
   delete userObject.loginAttempts;
   delete userObject.lockUntil;
+  if (!userObject.roles || userObject.roles.length === 0) {
+    userObject.roles = ['member'];
+  }
   return userObject;
 };
+
+userSchema.statics.ROLE_VALUES = ROLE_VALUES;
 
 module.exports = mongoose.model('User', userSchema);

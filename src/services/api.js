@@ -55,6 +55,32 @@ export const tasksAPI = {
   deleteTask: (id) => api.delete(`/tasks/${id}`),
 };
 
+// Admin API
+export const adminAPI = {
+  listUsers: () => api.get('/admin/users'),
+  createUser: (userData) => api.post('/admin/users', userData),
+  updateUser: (id, userData) => api.patch(`/admin/users/${id}`, userData),
+  deleteUser: (id) => api.delete(`/admin/users/${id}`),
+  updateUserRoles: (id, roles) => api.patch(`/admin/users/${id}/roles`, { roles }),
+  updateUserTeams: (id, teams) => api.patch(`/admin/users/${id}/teams`, { teams }),
+  updateUserPermissions: (id, permissions) => api.patch(`/admin/users/${id}/permissions`, { permissions }),
+  // Task management
+  getAllTasks: (params) => api.get('/admin/tasks', { params }),
+  getTaskStats: () => api.get('/admin/tasks/stats'),
+  assignTask: (taskId, userId) => api.patch(`/admin/tasks/${taskId}/assign`, { userId }),
+  updateTask: (taskId, taskData) => api.patch(`/admin/tasks/${taskId}`, taskData),
+};
+
+// Teams API
+export const teamsAPI = {
+  listTeams: () => api.get('/teams'),
+  getTeam: (id) => api.get(`/teams/${id}`),
+  createTeam: (teamData) => api.post('/teams', teamData),
+  updateTeam: (id, teamData) => api.patch(`/teams/${id}`, teamData),
+  deleteTeam: (id) => api.delete(`/teams/${id}`),
+  getAvailablePermissions: () => api.get('/teams/permissions/available'),
+};
+
 // Health check
 export const healthCheck = () => api.get('/health');
 

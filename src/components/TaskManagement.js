@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import styled from 'styled-components';
 import { useAuth } from '../contexts/AuthContext';
 import { tasksAPI } from '../services/api';
@@ -37,51 +38,12 @@ const WelcomeSection = styled.div`
     margin: 0 0 4px 0;
     letter-spacing: -0.3px;
   }
-  
+    
   p {
     color: #64748b;
     font-size: 13px;
     margin: 0;
     font-weight: 400;
-  }
-`;
-
-const UserSection = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 12px;
-`;
-
-const UserInfo = styled.div`
-  text-align: right;
-  
-  .name {
-    font-weight: 600;
-    color: #0f172a;
-    font-size: 14px;
-    margin: 0 0 2px 0;
-  }
-  
-  .email {
-    color: #94a3b8;
-    font-size: 12px;
-    margin: 0;
-  }
-`;
-
-const LogoutButton = styled.button`
-  background: #ef4444;
-  color: white;
-  border: none;
-  padding: 8px 16px;
-  border-radius: 8px;
-  font-weight: 600;
-  cursor: pointer;
-  font-size: 13px;
-  transition: all 0.2s ease;
-
-  &:hover {
-    background: #dc2626;
   }
 `;
 
@@ -620,6 +582,7 @@ const ModalContent = styled.div`
   max-height: 90vh;
   overflow-y: auto;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  position: relative;
 `;
 
 const ModalHeader = styled.div`
@@ -778,6 +741,32 @@ const LoadingContent = styled.div`
   align-items: center;
 `;
 
+const ModalLoaderOverlay = styled.div`
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+`;
+
+const InlineSpinner = styled.div`
+  width: 16px;
+  height: 16px;
+  border: 3px solid rgba(255, 255, 255, 0.6);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+`;
+
 const TaskPreviewContent = styled.div`
   font-size: 14px;
   line-height: 1.6;
@@ -916,6 +905,10 @@ const ModalButton = styled.button`
   cursor: pointer;
   transition: all 0.2s ease;
   border: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
   
   &.primary {
     background: linear-gradient(135deg, #3b82f6, #2563eb);
@@ -935,6 +928,12 @@ const ModalButton = styled.button`
     &:hover {
       background: #e2e8f0;
     }
+  }
+
+  &:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+    box-shadow: none;
   }
 `;
 
@@ -958,7 +957,7 @@ const EmptyState = styled.div`
 `;
 
 const TaskManagement = () => {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const [tasks, setTasks] = useState([]);
   const [newTask, setNewTask] = useState('');
   const [newDescription, setNewDescription] = useState('');
@@ -966,6 +965,7 @@ const TaskManagement = () => {
   const [filter, setFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isCreatingTask, setIsCreatingTask] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showImageModal, setShowImageModal] = useState(false);
@@ -1115,9 +1115,11 @@ const TaskManagement = () => {
 
   const addTask = async (e) => {
     e.preventDefault();
+    if (isCreatingTask) return;
     if (newTask.trim() === '') return;
 
     try {
+      setIsCreatingTask(true);
       const response = await tasksAPI.createTask({
         title: newTask.trim(),
         description: newDescription,
@@ -1134,6 +1136,8 @@ const TaskManagement = () => {
     } catch (error) {
       console.error('Error adding task:', error);
       toast.error(error.response?.data?.message || 'Failed to add task');
+    } finally {
+      setIsCreatingTask(false);
     }
   };
 
@@ -1153,6 +1157,90 @@ const TaskManagement = () => {
       toast.error('Failed to update task');
     }
   };
+
+  const updateTaskStatus = async (taskId, status) => {
+    try {
+      const response = await tasksAPI.updateTask(taskId, { status });
+      const updatedTask = response.data;
+
+      setTasks(prevTasks => prevTasks.map(t => 
+        t._id === taskId ? updatedTask : t
+      ));
+
+      setSelectedTask(prev => (prev?._id === taskId ? updatedTask : prev));
+      setEditingTask(prev => (prev?._id === taskId ? updatedTask : prev));
+
+      const statusMessages = {
+        pending: 'Task moved to pending',
+        'in-progress': 'Task marked as in progress',
+        completed: 'Task marked as completed'
+      };
+
+      toast.success(statusMessages[status] || 'Task status updated');
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to update task status');
+    }
+  };
+
+  const handleStatusChange = (event, task, status) => {
+    event.stopPropagation();
+    if (task.status === status) return;
+    updateTaskStatus(task._id, status);
+  };
+
+  const handleDragEnd = (result) => {
+    const { destination, source, draggableId } = result;
+    if (!destination) return;
+    if (destination.droppableId === source.droppableId) return;
+    updateTaskStatus(draggableId, destination.droppableId);
+  };
+
+  const renderTaskActions = (columnStatus, task) => (
+    <KanbanTaskActions>
+      {columnStatus === 'pending' && (
+        <>
+          <KanbanIconButton
+            onClick={(e) => handleStatusChange(e, task, 'in-progress')}
+            title="Mark as in progress"
+            aria-label="Mark as in progress"
+          >
+            🚀
+          </KanbanIconButton>
+          <KanbanIconButton
+            onClick={(e) => handleStatusChange(e, task, 'completed')}
+            title="Mark as completed"
+            aria-label="Mark as completed"
+          >
+            ✅
+          </KanbanIconButton>
+        </>
+      )}
+      {columnStatus === 'in-progress' && (
+        <KanbanIconButton
+          onClick={(e) => handleStatusChange(e, task, 'completed')}
+          title="Mark as completed"
+          aria-label="Mark as completed"
+        >
+          ✅
+        </KanbanIconButton>
+      )}
+      {columnStatus === 'completed' && (
+        <KanbanIconButton
+          onClick={(e) => handleStatusChange(e, task, 'in-progress')}
+          title="Mark as in progress"
+          aria-label="Mark as in progress"
+        >
+          🔄
+        </KanbanIconButton>
+      )}
+      <KanbanIconButton edit onClick={(e) => { e.stopPropagation(); openEditModal(task); }}>
+        ✏️
+      </KanbanIconButton>
+      <KanbanIconButton danger onClick={(e) => { e.stopPropagation(); deleteTask(task._id); }}>
+        🗑️
+      </KanbanIconButton>
+    </KanbanTaskActions>
+  );
 
   const deleteTask = async (taskId) => {
     if (!window.confirm('Are you sure you want to delete this task?')) return;
@@ -1182,6 +1270,7 @@ const TaskManagement = () => {
   };
 
   const closeAddModal = () => {
+    if (isCreatingTask) return;
     setShowAddModal(false);
     setNewTask('');
     setNewDescription('');
@@ -1226,13 +1315,17 @@ const TaskManagement = () => {
   };
 
   const stats = getStats();
-  const filteredTasks = getFilteredTasks();
   const priorityColors = {
     urgent: { bg: '#fef2f2', border: '#fecaca', text: '#991b1b' },
     high: { bg: '#fffbeb', border: '#fde68a', text: '#92400e' },
     medium: { bg: '#eff6ff', border: '#bfdbfe', text: '#1e40af' },
     low: { bg: '#f9fafb', border: '#e5e7eb', text: '#4b5563' }
   };
+  const columnConfigs = [
+    { status: 'pending', title: 'Pending', color: '#f59e0b', emptyText: 'No pending tasks' },
+    { status: 'in-progress', title: 'In Progress', color: '#3b82f6', emptyText: 'No in-progress tasks' },
+    { status: 'completed', title: 'Completed', color: '#10b981', emptyText: 'No completed tasks' }
+  ];
 
   return (
     <Container>
@@ -1240,18 +1333,8 @@ const TaskManagement = () => {
         <Header>
           <WelcomeSection>
             <h1>Task Management</h1>
-            <p>Stay organized, get things done</p>
+            <p>Stay organized, get things done{user?.fullName ? `, ${user.fullName.split(' ')[0]}` : ''}</p>
           </WelcomeSection>
-          
-          <UserSection>
-            <UserInfo>
-              <p className="name">{user?.fullName}</p>
-              <p className="email">{user?.email}</p>
-            </UserInfo>
-            <LogoutButton onClick={logout}>
-              Logout
-            </LogoutButton>
-          </UserSection>
         </Header>
 
         <StatsGrid>
@@ -1282,145 +1365,101 @@ const TaskManagement = () => {
             </AddTaskButton>
           </HeaderActions>
 
+          <DragDropContext onDragEnd={handleDragEnd}>
           <KanbanBoard>
-            <KanbanColumn>
-              <ColumnHeader color="#f59e0b">
-                <ColumnTitle color="#f59e0b">Pending</ColumnTitle>
-                <ColumnCount color="#f59e0b">{tasks.filter(t => t.status === 'pending').length}</ColumnCount>
+              {columnConfigs.map((column) => {
+                const columnTasks = tasks.filter(task =>
+                  task.status === column.status &&
+                  (!searchQuery || task.title.toLowerCase().includes(searchQuery.toLowerCase()))
+                );
+                const totalInColumn = tasks.filter(task => task.status === column.status).length;
+                return (
+                  <KanbanColumn key={column.status}>
+                    <ColumnHeader color={column.color}>
+                      <ColumnTitle color={column.color}>{column.title}</ColumnTitle>
+                      <ColumnCount color={column.color}>{totalInColumn}</ColumnCount>
               </ColumnHeader>
-              <ColumnTasks>
-                {tasks.filter(task => task.status === 'pending' && 
-                  (!searchQuery || task.title.toLowerCase().includes(searchQuery.toLowerCase()))).map(task => (
+                    <Droppable droppableId={column.status}>
+                      {(provided, snapshot) => (
+                        <ColumnTasks
+                          ref={provided.innerRef}
+                          {...provided.droppableProps}
+                          style={snapshot.isDraggingOver ? { background: '#eef2ff50' } : undefined}
+                        >
+                          {columnTasks.map((task, index) => {
+                            const isCompletedColumn = column.status === 'completed';
+                            const descriptionHtml = task.description
+                              ? (isCompletedColumn ? task.description : stripImagesFromHTML(task.description))
+                              : null;
+                            return (
+                              <Draggable key={task._id} draggableId={task._id} index={index}>
+                                {(dragProvided, dragSnapshot) => (
                   <KanbanTask 
-                    key={task._id}
+                                    ref={dragProvided.innerRef}
+                                    {...dragProvided.draggableProps}
+                                    {...dragProvided.dragHandleProps}
                     priority={task.priority}
                     onClick={() => handleTaskClick(task)}
+                                    style={dragProvided.draggableProps.style}
+                                    data-dragging={dragSnapshot.isDragging}
                   >
                     <KanbanTaskHeader>
-                      <KanbanTaskTitle>{task.title}</KanbanTaskTitle>
+                                      <KanbanTaskTitle completed={isCompletedColumn}>{task.title}</KanbanTaskTitle>
                       <KanbanTaskPriority priority={task.priority} />
                     </KanbanTaskHeader>
-                    {task.description && (
-                      <div style={{ fontSize: '12px', color: '#64748b', marginTop: '8px' }} 
-                           dangerouslySetInnerHTML={{ __html: stripImagesFromHTML(task.description) }} />
+                                    {descriptionHtml && (
+                                      <div
+                                        style={{
+                                          fontSize: '12px',
+                                          color: '#64748b',
+                                          marginTop: '8px',
+                                          ...(isCompletedColumn ? { opacity: 0.7 } : {})
+                                        }}
+                                        dangerouslySetInnerHTML={{ __html: descriptionHtml }}
+                                      />
                     )}
                     <KanbanTaskFooter>
                       <TaskBadge type="priority" value={task.priority}>
                         {task.priority}
                       </TaskBadge>
-                      <KanbanTaskActions>
-                        <KanbanIconButton edit onClick={(e) => { e.stopPropagation(); openEditModal(task); }}>
-                          ✏️
-                        </KanbanIconButton>
-                        <KanbanIconButton danger onClick={(e) => { e.stopPropagation(); deleteTask(task._id); }}>
-                          🗑️
-                        </KanbanIconButton>
-                      </KanbanTaskActions>
+                                      {renderTaskActions(column.status, task)}
                     </KanbanTaskFooter>
                   </KanbanTask>
-                ))}
-                {tasks.filter(t => t.status === 'pending').length === 0 && (
+                                )}
+                              </Draggable>
+                            );
+                          })}
+                          {totalInColumn === 0 && (
                   <EmptyState>
-                    <p style={{ fontSize: '13px' }}>No pending tasks</p>
+                              <p style={{ fontSize: '13px' }}>{column.emptyText}</p>
                   </EmptyState>
                 )}
+                          {provided.placeholder}
               </ColumnTasks>
+                      )}
+                    </Droppable>
             </KanbanColumn>
-
-            <KanbanColumn>
-              <ColumnHeader color="#3b82f6">
-                <ColumnTitle color="#3b82f6">In Progress</ColumnTitle>
-                <ColumnCount color="#3b82f6">{tasks.filter(t => t.status === 'in-progress').length}</ColumnCount>
-              </ColumnHeader>
-              <ColumnTasks>
-                {tasks.filter(task => task.status === 'in-progress' && 
-                  (!searchQuery || task.title.toLowerCase().includes(searchQuery.toLowerCase()))).map(task => (
-                  <KanbanTask 
-                    key={task._id}
-                    priority={task.priority}
-                    onClick={() => handleTaskClick(task)}
-                  >
-                    <KanbanTaskHeader>
-                      <KanbanTaskTitle>{task.title}</KanbanTaskTitle>
-                      <KanbanTaskPriority priority={task.priority} />
-                    </KanbanTaskHeader>
-                    {task.description && (
-                      <div style={{ fontSize: '12px', color: '#64748b', marginTop: '8px' }} 
-                           dangerouslySetInnerHTML={{ __html: stripImagesFromHTML(task.description) }} />
-                    )}
-                    <KanbanTaskFooter>
-                      <TaskBadge type="priority" value={task.priority}>
-                        {task.priority}
-                      </TaskBadge>
-                      <KanbanTaskActions>
-                        <KanbanIconButton edit onClick={(e) => { e.stopPropagation(); openEditModal(task); }}>
-                          ✏️
-                        </KanbanIconButton>
-                        <KanbanIconButton danger onClick={(e) => { e.stopPropagation(); deleteTask(task._id); }}>
-                          🗑️
-                        </KanbanIconButton>
-                      </KanbanTaskActions>
-                    </KanbanTaskFooter>
-                  </KanbanTask>
-                ))}
-                {tasks.filter(t => t.status === 'in-progress').length === 0 && (
-                  <EmptyState>
-                    <p style={{ fontSize: '13px' }}>No in-progress tasks</p>
-                  </EmptyState>
-                )}
-              </ColumnTasks>
-            </KanbanColumn>
-
-            <KanbanColumn>
-              <ColumnHeader color="#10b981">
-                <ColumnTitle color="#10b981">Completed</ColumnTitle>
-                <ColumnCount color="#10b981">{tasks.filter(t => t.status === 'completed').length}</ColumnCount>
-              </ColumnHeader>
-              <ColumnTasks>
-                {tasks.filter(task => task.status === 'completed' && 
-                  (!searchQuery || task.title.toLowerCase().includes(searchQuery.toLowerCase()))).map(task => (
-                  <KanbanTask 
-                    key={task._id}
-                    priority={task.priority}
-                    onClick={() => handleTaskClick(task)}
-                  >
-                    <KanbanTaskHeader>
-                      <KanbanTaskTitle style={{ textDecoration: 'line-through', opacity: 0.7 }}>{task.title}</KanbanTaskTitle>
-                      <KanbanTaskPriority priority={task.priority} />
-                    </KanbanTaskHeader>
-                    {task.description && (
-                      <div style={{ fontSize: '12px', color: '#64748b', marginTop: '8px', opacity: 0.7 }} 
-                           dangerouslySetInnerHTML={{ __html: task.description }} />
-                    )}
-                    <KanbanTaskFooter>
-                      <TaskBadge type="priority" value={task.priority}>
-                        {task.priority}
-                      </TaskBadge>
-                      <KanbanTaskActions>
-                        <KanbanIconButton edit onClick={(e) => { e.stopPropagation(); openEditModal(task); }}>
-                          ✏️
-                        </KanbanIconButton>
-                        <KanbanIconButton danger onClick={(e) => { e.stopPropagation(); deleteTask(task._id); }}>
-                          🗑️
-                        </KanbanIconButton>
-                      </KanbanTaskActions>
-                    </KanbanTaskFooter>
-                  </KanbanTask>
-                ))}
-                {tasks.filter(t => t.status === 'completed').length === 0 && (
-                  <EmptyState>
-                    <p style={{ fontSize: '13px' }}>No completed tasks</p>
-                  </EmptyState>
-                )}
-              </ColumnTasks>
-            </KanbanColumn>
+                );
+              })}
           </KanbanBoard>
+          </DragDropContext>
         </MainContent>
       </ContentWrapper>
 
       {showAddModal && (
         <Modal onClick={closeAddModal}>
           <ModalContent onClick={(e) => e.stopPropagation()}>
+            {isCreatingTask && (
+              <ModalLoaderOverlay>
+                <LoadingContent>
+                  <LoaderSpinner />
+                  <LoaderText>
+                    <span>⏳</span>
+                    Creating task, please wait...
+                  </LoaderText>
+                </LoadingContent>
+              </ModalLoaderOverlay>
+            )}
             <ModalHeader>
               <h2>Create New Task</h2>
               <CloseButton onClick={closeAddModal}>×</CloseButton>
@@ -1495,11 +1534,17 @@ const TaskManagement = () => {
                 </PriorityButtons>
               </PrioritySection>
               <ModalActions>
-                <ModalButton type="button" className="secondary" onClick={closeAddModal}>
+                <ModalButton
+                  type="button"
+                  className="secondary"
+                  onClick={closeAddModal}
+                  disabled={isCreatingTask}
+                >
                   Cancel
                 </ModalButton>
-                <ModalButton type="submit" className="primary">
-                  Create Task
+                <ModalButton type="submit" className="primary" disabled={isCreatingTask}>
+                  {isCreatingTask && <InlineSpinner />}
+                  {isCreatingTask ? 'Creating...' : 'Create Task'}
                 </ModalButton>
               </ModalActions>
             </ModalForm>

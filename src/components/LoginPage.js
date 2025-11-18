@@ -121,43 +121,6 @@ const Button = styled.button`
   }
 `;
 
-const LinkButton = styled.button`
-  background: none;
-  border: none;
-  color: #3b82f6;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  text-align: left;
-  margin-top: 24px;
-  padding: 8px 0;
-
-  &:hover {
-    color: #2563eb;
-    text-decoration: underline;
-  }
-`;
-
-const Divider = styled.div`
-  display: flex;
-  align-items: center;
-  margin: 24px 0;
-  
-  &::before,
-  &::after {
-    content: '';
-    flex: 1;
-    height: 1px;
-    background: #e8ecf0;
-  }
-  
-  span {
-    padding: 0 16px;
-    color: #94a3b8;
-    font-size: 13px;
-  }
-`;
-
 const LoadingSpinner = styled.div`
   display: inline-block;
   width: 18px;
@@ -172,7 +135,7 @@ const LoadingSpinner = styled.div`
   }
 `;
 
-const LoginPage = ({ onLogin, onSwitchToRegister }) => {
+const LoginPage = ({ onLogin }) => {
   const [isLoading, setIsLoading] = useState(false);
   const { register, handleSubmit, formState: { errors } } = useForm();
 
@@ -240,14 +203,6 @@ const LoginPage = ({ onLogin, onSwitchToRegister }) => {
             {isLoading ? <LoadingSpinner /> : 'Sign In'}
           </Button>
         </Form>
-
-        <Divider>
-          <span>Don't have an account?</span>
-        </Divider>
-
-        <LinkButton onClick={onSwitchToRegister}>
-          Create an account
-        </LinkButton>
       </Card>
     </Container>
   );

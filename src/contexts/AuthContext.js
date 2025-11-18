@@ -26,14 +26,18 @@ export const AuthProvider = ({ children }) => {
       const token = localStorage.getItem('token');
       const storedUser = localStorage.getItem('user');
 
-      if (token && storedUser) {
-        // Verify token with backend
-        const response = await authAPI.getCurrentUser();
-        setUser(response.data.user);
-        setIsAuthenticated(true);
+      if (!token || !storedUser) {
+        setUser(null);
+        setIsAuthenticated(false);
+        return;
       }
+
+      const response = await authAPI.getCurrentUser();
+      const currentUser = response.data.user;
+      setUser(currentUser);
+      setIsAuthenticated(true);
+      localStorage.setItem('user', JSON.stringify(currentUser));
     } catch (error) {
-      // Token is invalid or expired
       localStorage.removeItem('token');
       localStorage.removeItem('user');
       setUser(null);
@@ -47,6 +51,7 @@ export const AuthProvider = ({ children }) => {
     try {
       setUser(userData);
       setIsAuthenticated(true);
+      localStorage.setItem('user', JSON.stringify(userData));
       toast.success(`Welcome back, ${userData.firstName}!`);
     } catch (error) {
       console.error('Login error:', error);
@@ -58,6 +63,7 @@ export const AuthProvider = ({ children }) => {
     try {
       setUser(userData);
       setIsAuthenticated(true);
+      localStorage.setItem('user', JSON.stringify(userData));
       toast.success(`Welcome, ${userData.firstName}!`);
     } catch (error) {
       console.error('Registration error:', error);

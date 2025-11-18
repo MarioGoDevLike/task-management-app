@@ -44,6 +44,7 @@ router.post('/register', [
     }
 
     const { email, password, firstName, lastName } = req.body;
+    const userCount = await User.countDocuments();
 
     // Check if user already exists
     const existingUser = await User.findOne({ email });
@@ -58,7 +59,8 @@ router.post('/register', [
       email,
       password,
       firstName,
-      lastName
+      lastName,
+      roles: userCount === 0 ? ['admin'] : undefined
     });
 
     await user.save();
@@ -74,7 +76,8 @@ router.post('/register', [
         email: user.email,
         firstName: user.firstName,
         lastName: user.lastName,
-        fullName: user.fullName
+        fullName: user.fullName,
+        roles: user.roles
       }
     });
 
@@ -156,7 +159,8 @@ router.post('/login', [
         firstName: user.firstName,
         lastName: user.lastName,
         fullName: user.fullName,
-        lastLogin: user.lastLogin
+        lastLogin: user.lastLogin,
+        roles: user.roles
       }
     });
 
@@ -180,7 +184,8 @@ router.get('/me', auth, async (req, res) => {
         firstName: req.user.firstName,
         lastName: req.user.lastName,
         fullName: req.user.fullName,
-        lastLogin: req.user.lastLogin
+        lastLogin: req.user.lastLogin,
+        roles: req.user.roles
       }
     });
   } catch (error) {
