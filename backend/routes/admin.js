@@ -1,5 +1,6 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
+const mongoose = require('mongoose');
 const auth = require('../middleware/auth');
 const authorize = require('../middleware/authorize');
 const User = require('../models/User');
@@ -483,13 +484,37 @@ router.get('/tasks', async (req, res) => {
     
     if (status) filter.status = status;
     if (priority) filter.priority = priority;
-    if (userId) filter.user = userId;
+    
+    // Handle userId filter - check both assignees and user field
+    if (userId) {
+      const userIdObj = mongoose.Types.ObjectId.isValid(userId) 
+        ? new mongoose.Types.ObjectId(userId) 
+        : userId;
+      filter.$or = [
+        { assignees: userIdObj },
+        { user: userIdObj }
+      ];
+    }
     
     if (search) {
-      filter.$or = [
-        { title: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } }
-      ];
+      // Combine search with userId filter if both exist
+      const searchFilter = {
+        $or: [
+          { title: { $regex: search, $options: 'i' } },
+          { description: { $regex: search, $options: 'i' } }
+        ]
+      };
+      
+      if (filter.$or) {
+        // If userId filter exists, combine with search
+        filter.$and = [
+          { $or: filter.$or },
+          searchFilter
+        ];
+        delete filter.$or;
+      } else {
+        filter.$or = searchFilter.$or;
+      }
     }
     
     const sortOptions = {};
@@ -522,6 +547,23 @@ router.get('/tasks', async (req, res) => {
           preserveNullAndEmptyArrays: true
         }
       },
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'assignees',
+          foreignField: '_id',
+          as: 'assignees',
+          pipeline: [
+            {
+              $project: {
+                firstName: 1,
+                lastName: 1,
+                email: 1
+              }
+            }
+          ]
+        }
+      },
       { $sort: sortOptions },
       { $skip: (page - 1) * limit },
       { $limit: limit * 1 },
@@ -532,25 +574,11 @@ router.get('/tasks', async (req, res) => {
       }
     ];
     
-    // Try multiple approaches to ensure allowDiskUse works
-    let tasks;
-    try {
-      // First try: Use native collection with explicit options
-      const collection = Task.collection;
-      const cursor = collection.aggregate(pipeline);
-      cursor.allowDiskUse(true);
-      tasks = await cursor.toArray();
-    } catch (err) {
-      // Fallback: If allowDiskUse fails, try with smaller batch and different approach
-      console.warn('allowDiskUse failed, trying alternative approach:', err.message);
-      
-      // Alternative: Sort on indexed field only, or use find with sort
-      // For now, let's try the mongoose aggregate with explicit options
-      const mongoose = require('mongoose');
-      tasks = await mongoose.connection.db.collection('tasks').aggregate(pipeline, {
-        allowDiskUse: true
-      }).toArray();
-    }
+    // Use aggregation with allowDiskUse option to handle large sorts
+    // allowDiskUse must be passed as an option to aggregate(), not as a cursor method
+    const tasks = await mongoose.connection.db.collection('tasks').aggregate(pipeline, {
+      allowDiskUse: true
+    }).toArray();
     
     // Transform user data to match populate format and convert ObjectIds to strings
     const transformedTasks = tasks.map(task => ({

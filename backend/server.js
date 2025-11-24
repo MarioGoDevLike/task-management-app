@@ -1,4 +1,6 @@
 const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -10,9 +12,21 @@ const authRoutes = require('./routes/auth');
 const taskRoutes = require('./routes/tasks');
 const adminRoutes = require('./routes/admin');
 const teamRoutes = require('./routes/teams');
+const socketAuth = require('./middleware/socketAuth');
 
 const app = express();
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: process.env.CLIENT_URL || 'http://localhost:3000',
+    credentials: true
+  }
+});
+
 const PORT = process.env.PORT || 5000;
+
+// Make io available to routes
+app.set('io', io);
 
 // Security middleware
 app.use(helmet());
@@ -108,10 +122,30 @@ app.use('*', (req, res) => {
   res.status(404).json({ message: 'Route not found' });
 });
 
+// Socket.io connection handling
+io.use(socketAuth);
+
+io.on('connection', (socket) => {
+  console.log(`✅ User connected: ${socket.userId}`);
+  
+  // Join user's personal room for task updates
+  socket.join(`user:${socket.userId}`);
+  
+  // Join admin room if user is admin
+  if (socket.isAdmin) {
+    socket.join('admin');
+  }
+  
+  socket.on('disconnect', () => {
+    console.log(`❌ User disconnected: ${socket.userId}`);
+  });
+});
+
 // Start server only after MongoDB connection is established
 mongoose.connection.once('open', () => {
-  app.listen(PORT, () => {
+  server.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
     console.log(`📊 Health check: http://localhost:${PORT}/api/health`);
+    console.log(`🔌 Socket.io ready for real-time updates`);
   });
 });

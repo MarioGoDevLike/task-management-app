@@ -17,6 +17,7 @@ import {
   X,
   Edit,
   Trash2,
+  AlertTriangle,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { adminAPI, teamsAPI } from '../services/api';
@@ -766,6 +767,114 @@ const ModalButton = styled.button`
     cursor: not-allowed;
     transform: none;
   }
+
+  &.danger {
+    background: linear-gradient(135deg, #ef4444, #dc2626);
+    color: white;
+    box-shadow: 0 2px 8px rgba(239, 68, 68, 0.2);
+
+    &:hover:not(:disabled) {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
+    }
+  }
+`;
+
+const ConfirmModal = styled.div`
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  padding: 20px;
+`;
+
+const ConfirmModalContent = styled.div`
+  background: white;
+  border-radius: 20px;
+  padding: 32px;
+  max-width: 480px;
+  width: 100%;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  position: relative;
+  animation: slideIn 0.2s ease-out;
+  
+  @keyframes slideIn {
+    from {
+      opacity: 0;
+      transform: translateY(-20px) scale(0.95);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+`;
+
+const ConfirmModalHeader = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 20px;
+  
+  .icon-wrapper {
+    width: 56px;
+    height: 56px;
+    border-radius: 14px;
+    background: #fef2f2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    
+    svg {
+      color: #ef4444;
+      width: 28px;
+      height: 28px;
+    }
+  }
+  
+  h3 {
+    font-size: 22px;
+    font-weight: 700;
+    color: #0f172a;
+    margin: 0;
+    flex: 1;
+  }
+`;
+
+const ConfirmModalBody = styled.div`
+  margin-bottom: 24px;
+  
+  p {
+    font-size: 15px;
+    color: #475569;
+    line-height: 1.6;
+    margin: 0 0 12px 0;
+  }
+  
+  .item-name {
+    background: #f8fafc;
+    padding: 12px 16px;
+    border-radius: 10px;
+    border: 1px solid #e2e8f0;
+    font-weight: 600;
+    color: #0f172a;
+    font-size: 14px;
+    margin-top: 12px;
+  }
+`;
+
+const ConfirmModalActions = styled.div`
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
 `;
 
 const rolePalette = {
@@ -805,6 +914,10 @@ const SettingsPage = () => {
   const [isCreatingUser, setIsCreatingUser] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
   const [isDeletingUser, setIsDeletingUser] = useState(null);
+  const [showDeleteUserModal, setShowDeleteUserModal] = useState(false);
+  const [userToDelete, setUserToDelete] = useState(null);
+  const [showDeleteTeamModal, setShowDeleteTeamModal] = useState(false);
+  const [teamToDelete, setTeamToDelete] = useState(null);
   const [newUserForm, setNewUserForm] = useState({
     firstName: '',
     lastName: '',
@@ -1123,20 +1236,24 @@ const SettingsPage = () => {
     setShowCreateUserModal(true);
   };
 
-  const handleDeleteUser = async (userId) => {
+  const handleDeleteUser = (userId) => {
     const user = users.find(u => u._id === userId);
     if (!user) return;
+    setUserToDelete(user);
+    setShowDeleteUserModal(true);
+  };
 
-    const displayName = user.fullName || [user.firstName, user.lastName].filter(Boolean).join(' ').trim() || user.email;
+  const confirmDeleteUser = async () => {
+    if (!userToDelete) return;
+
+    const displayName = userToDelete.fullName || [userToDelete.firstName, userToDelete.lastName].filter(Boolean).join(' ').trim() || userToDelete.email;
     
-    if (!window.confirm(`Are you sure you want to delete user "${displayName}"? This action cannot be undone.`)) {
-      return;
-    }
-
-    setIsDeletingUser(userId);
+    setIsDeletingUser(userToDelete._id);
     try {
-      await adminAPI.deleteUser(userId);
-      setUsers(prev => prev.filter(u => u._id !== userId));
+      await adminAPI.deleteUser(userToDelete._id);
+      setUsers(prev => prev.filter(u => u._id !== userToDelete._id));
+      setShowDeleteUserModal(false);
+      setUserToDelete(null);
       toast.success(`User "${displayName}" deleted successfully!`);
     } catch (error) {
       console.error('Delete user failed:', error);
@@ -1145,6 +1262,12 @@ const SettingsPage = () => {
     } finally {
       setIsDeletingUser(null);
     }
+  };
+
+  const cancelDeleteUser = () => {
+    if (isDeletingUser) return;
+    setShowDeleteUserModal(false);
+    setUserToDelete(null);
   };
 
   const handleRoleToggle = (role) => {
@@ -1202,20 +1325,32 @@ const SettingsPage = () => {
     }
   };
 
-  const handleDeleteTeam = async (teamId) => {
-    if (!window.confirm('Are you sure you want to delete this team? Users assigned to this team will be removed from it.')) {
-      return;
-    }
+  const handleDeleteTeam = (teamId) => {
+    const team = teams.find(t => t._id === teamId);
+    if (!team) return;
+    setTeamToDelete(team);
+    setShowDeleteTeamModal(true);
+  };
+
+  const confirmDeleteTeam = async () => {
+    if (!teamToDelete) return;
 
     try {
-      await teamsAPI.deleteTeam(teamId);
-      setTeams(prev => prev.filter(t => t._id !== teamId));
+      await teamsAPI.deleteTeam(teamToDelete._id);
+      setTeams(prev => prev.filter(t => t._id !== teamToDelete._id));
+      setShowDeleteTeamModal(false);
+      setTeamToDelete(null);
       toast.success('Team deleted successfully!');
     } catch (error) {
       console.error('Team deletion failed:', error);
       const message = error.response?.data?.message || 'Unable to delete team.';
       toast.error(message);
     }
+  };
+
+  const cancelDeleteTeam = () => {
+    setShowDeleteTeamModal(false);
+    setTeamToDelete(null);
   };
 
   const handleEditTeam = (team) => {
@@ -2018,6 +2153,87 @@ const SettingsPage = () => {
             </Form>
           </ModalContent>
         </ModalOverlay>
+      )}
+
+      {showDeleteUserModal && userToDelete && (
+        <ConfirmModal onClick={cancelDeleteUser}>
+          <ConfirmModalContent onClick={(e) => e.stopPropagation()}>
+            <ConfirmModalHeader>
+              <div className="icon-wrapper">
+                <AlertTriangle />
+              </div>
+              <h3>Delete User</h3>
+            </ConfirmModalHeader>
+            <ConfirmModalBody>
+              <p>Are you sure you want to delete this user? This action cannot be undone.</p>
+              <div className="item-name">
+                {userToDelete.fullName || [userToDelete.firstName, userToDelete.lastName].filter(Boolean).join(' ').trim() || userToDelete.email}
+              </div>
+            </ConfirmModalBody>
+            <ConfirmModalActions>
+              <ModalButton
+                className="secondary"
+                onClick={cancelDeleteUser}
+                disabled={isDeletingUser === userToDelete._id}
+              >
+                <X size={16} style={{ marginRight: '8px' }} />
+                Cancel
+              </ModalButton>
+              <ModalButton
+                className="danger"
+                onClick={confirmDeleteUser}
+                disabled={isDeletingUser === userToDelete._id}
+              >
+                {isDeletingUser === userToDelete._id ? (
+                  <>
+                    <Spinner size={14} style={{ display: 'inline-block', marginRight: '8px' }} />
+                    Deleting...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 size={16} style={{ marginRight: '8px' }} />
+                    Delete User
+                  </>
+                )}
+              </ModalButton>
+            </ConfirmModalActions>
+          </ConfirmModalContent>
+        </ConfirmModal>
+      )}
+
+      {showDeleteTeamModal && teamToDelete && (
+        <ConfirmModal onClick={cancelDeleteTeam}>
+          <ConfirmModalContent onClick={(e) => e.stopPropagation()}>
+            <ConfirmModalHeader>
+              <div className="icon-wrapper">
+                <AlertTriangle />
+              </div>
+              <h3>Delete Team</h3>
+            </ConfirmModalHeader>
+            <ConfirmModalBody>
+              <p>Are you sure you want to delete this team? Users assigned to this team will be removed from it.</p>
+              <div className="item-name">
+                {teamToDelete.name}
+              </div>
+            </ConfirmModalBody>
+            <ConfirmModalActions>
+              <ModalButton
+                className="secondary"
+                onClick={cancelDeleteTeam}
+              >
+                <X size={16} style={{ marginRight: '8px' }} />
+                Cancel
+              </ModalButton>
+              <ModalButton
+                className="danger"
+                onClick={confirmDeleteTeam}
+              >
+                <Trash2 size={16} style={{ marginRight: '8px' }} />
+                Delete Team
+              </ModalButton>
+            </ConfirmModalActions>
+          </ConfirmModalContent>
+        </ConfirmModal>
       )}
     </PageWrapper>
   );

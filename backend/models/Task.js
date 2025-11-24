@@ -44,8 +44,12 @@ const taskSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    required: true
+    required: false // Keep for backward compatibility, but prefer assignees
   },
+  assignees: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  }],
   isArchived: {
     type: Boolean,
     default: false
@@ -63,6 +67,9 @@ const taskSchema = new mongoose.Schema({
 taskSchema.index({ user: 1, status: 1 });
 taskSchema.index({ user: 1, dueDate: 1 });
 taskSchema.index({ user: 1, priority: 1 });
+taskSchema.index({ assignees: 1, status: 1 });
+taskSchema.index({ assignees: 1, dueDate: 1 });
+taskSchema.index({ assignees: 1, priority: 1 });
 taskSchema.index({ createdAt: -1 }); // For admin dashboard sorting
 taskSchema.index({ status: 1, createdAt: -1 }); // Compound index for common queries
 taskSchema.index({ priority: 1, createdAt: -1 }); // Compound index for priority sorting
@@ -72,8 +79,18 @@ taskSchema.virtual('age').get(function() {
   return Math.floor((Date.now() - this.createdAt) / (1000 * 60 * 60 * 24)); // days
 });
 
-// Pre-save middleware to set completedAt
+// Pre-save middleware to set completedAt and migrate user to assignees
 taskSchema.pre('save', function(next) {
+  // Migrate user to assignees if user exists and assignees is empty
+  if (this.user && (!this.assignees || this.assignees.length === 0)) {
+    if (!this.assignees) {
+      this.assignees = [];
+    }
+    if (!this.assignees.includes(this.user)) {
+      this.assignees.push(this.user);
+    }
+  }
+  
   if (this.isModified('status') && this.status === 'completed' && !this.completedAt) {
     this.completedAt = new Date();
   } else if (this.isModified('status') && this.status !== 'completed') {

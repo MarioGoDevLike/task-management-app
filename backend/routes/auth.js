@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const { body, validationResult } = require('express-validator');
 const User = require('../models/User');
 const auth = require('../middleware/auth');
+const { getUserPermissions } = require('../utils/permissions');
 
 const router = express.Router();
 
@@ -147,6 +148,12 @@ router.post('/login', [
     user.lastLogin = new Date();
     await user.save();
 
+    // Populate teams to get permissions
+    await user.populate('teams');
+    
+    // Get effective permissions
+    const permissions = await getUserPermissions(user);
+
     // Generate token
     const token = generateToken(user._id);
 
@@ -160,7 +167,9 @@ router.post('/login', [
         lastName: user.lastName,
         fullName: user.fullName,
         lastLogin: user.lastLogin,
-        roles: user.roles
+        roles: user.roles,
+        teams: user.teams,
+        permissions: permissions
       }
     });
 
@@ -177,6 +186,12 @@ router.post('/login', [
 // @access  Private
 router.get('/me', auth, async (req, res) => {
   try {
+    // Populate teams to get permissions
+    await req.user.populate('teams');
+    
+    // Get effective permissions
+    const permissions = await getUserPermissions(req.user);
+    
     res.json({
       user: {
         id: req.user._id,
@@ -185,7 +200,9 @@ router.get('/me', auth, async (req, res) => {
         lastName: req.user.lastName,
         fullName: req.user.fullName,
         lastLogin: req.user.lastLogin,
-        roles: req.user.roles
+        roles: req.user.roles,
+        teams: req.user.teams,
+        permissions: permissions
       }
     });
   } catch (error) {

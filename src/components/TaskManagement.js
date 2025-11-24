@@ -2,10 +2,23 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import styled from 'styled-components';
 import { useAuth } from '../contexts/AuthContext';
-import { tasksAPI } from '../services/api';
+import { useTasks } from '../contexts/TasksContext';
+import { tasksAPI, adminAPI } from '../services/api';
 import { toast } from 'react-hot-toast';
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
+import { 
+  CheckCircle2, 
+  Edit, 
+  Trash2, 
+  PlayCircle, 
+  RotateCcw,
+  AlertTriangle,
+  X,
+  UserPlus,
+  Users,
+  Search
+} from 'lucide-react';
 
 const Container = styled.div`
   min-height: 100vh;
@@ -208,13 +221,16 @@ const ColumnTasks = styled.div`
 
 const KanbanTask = styled.div`
   background: white;
-  padding: 16px;
-  border-radius: 8px;
+  padding: 14px;
+  border-radius: 12px;
   border: 1px solid #e8ecf0;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
   cursor: pointer;
   transition: all 0.2s ease;
   position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   
   &::before {
     content: '';
@@ -222,78 +238,189 @@ const KanbanTask = styled.div`
     left: 0;
     top: 0;
     bottom: 0;
-    width: 3px;
+    width: 4px;
     background: ${props => {
       if (props.priority === 'urgent') return '#ef4444';
       if (props.priority === 'high') return '#f59e0b';
       if (props.priority === 'medium') return '#3b82f6';
       return '#94a3b8';
     }};
-    border-radius: 3px 0 0 3px;
+    border-radius: 12px 0 0 12px;
   }
   
   &:hover {
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
     transform: translateY(-2px);
+    border-color: #cbd5e1;
   }
 `;
 
 const KanbanTaskHeader = styled.div`
   display: flex;
-  justify-content: space-between;
-  align-items: start;
-  margin-bottom: 8px;
+  flex-direction: column;
+  gap: 8px;
 `;
 
 const KanbanTaskTitle = styled.div`
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
   color: #0f172a;
-  line-height: 1.4;
+  line-height: 1.5;
   flex: 1;
+  word-break: break-word;
+  ${props => props.completed && `
+    text-decoration: line-through;
+    opacity: 0.6;
+  `}
 `;
 
-const KanbanTaskPriority = styled.div`
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
+const KanbanTaskMeta = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+`;
+
+const KanbanTaskPriorityBadge = styled.span`
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
   background: ${props => {
-    if (props.priority === 'urgent') return '#ef4444';
-    if (props.priority === 'high') return '#f59e0b';
-    if (props.priority === 'medium') return '#3b82f6';
-    return '#94a3b8';
+    if (props.priority === 'urgent') return '#fee2e2';
+    if (props.priority === 'high') return '#fef3c7';
+    if (props.priority === 'medium') return '#dbeafe';
+    return '#f1f5f9';
   }};
-  flex-shrink: 0;
-  margin-left: 8px;
+  color: ${props => {
+    if (props.priority === 'urgent') return '#991b1b';
+    if (props.priority === 'high') return '#92400e';
+    if (props.priority === 'medium') return '#1e40af';
+    return '#475569';
+  }};
+`;
+
+const KanbanTaskAssignee = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #64748b;
+  flex-wrap: wrap;
+  
+  .avatar {
+    width: 20px;
+    height: 20px;
+    border-radius: 6px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: 600;
+    font-size: 9px;
+    flex-shrink: 0;
+    border: 1.5px solid white;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.05);
+  }
+  
+  .assignee-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  
+  .more-count {
+    font-weight: 600;
+    color: #475569;
+  }
+`;
+
+const KanbanTaskDescription = styled.div`
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-top: 4px;
+  
+  * {
+    font-size: 12px !important;
+    color: #64748b !important;
+  }
 `;
 
 const KanbanTaskFooter = styled.div`
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-top: 8px;
-  padding-top: 8px;
+  margin-top: 4px;
+  padding-top: 10px;
   border-top: 1px solid #f1f5f9;
+  gap: 8px;
 `;
 
 const KanbanTaskActions = styled.div`
   display: flex;
   gap: 4px;
+  flex-wrap: wrap;
+  margin-left: auto;
 `;
 
 const KanbanIconButton = styled.button`
-  background: none;
+  background: transparent;
   border: none;
-  padding: 4px 8px;
+  padding: 6px;
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: 6px;
   transition: all 0.2s ease;
-  color: #64748b;
-  font-size: 12px;
+  color: ${props => {
+    if (props.completed) return '#10b981';
+    if (props.danger) return '#ef4444';
+    if (props.edit) return '#3b82f6';
+    if (props.assign) return '#7c3aed';
+    return '#64748b';
+  }};
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  
+  svg {
+    width: 16px;
+    height: 16px;
+  }
   
   &:hover {
-    background: ${props => props.danger ? '#fee2e2' : props.edit ? '#eff6ff' : '#f1f5f9'};
-    color: ${props => props.danger ? '#ef4444' : props.edit ? '#3b82f6' : '#64748b'};
+    background: ${props => {
+      if (props.completed) return '#d1fae5';
+      if (props.danger) return '#fee2e2';
+      if (props.edit) return '#eff6ff';
+      if (props.assign) return '#f3e8ff';
+      return '#f1f5f9';
+    }};
+    color: ${props => {
+      if (props.completed) return '#059669';
+      if (props.danger) return '#dc2626';
+      if (props.edit) return '#2563eb';
+      if (props.assign) return '#6d28d9';
+      return '#475569';
+    }};
+    transform: scale(1.1);
+  }
+  
+  &:active {
+    transform: scale(0.95);
+  }
+  
+  &[title] {
+    position: relative;
   }
 `;
 
@@ -956,9 +1083,431 @@ const EmptyState = styled.div`
   }
 `;
 
+const DeleteModal = styled.div`
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  padding: 20px;
+`;
+
+const DeleteModalContent = styled.div`
+  background: white;
+  border-radius: 20px;
+  padding: 32px;
+  max-width: 480px;
+  width: 100%;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  position: relative;
+  animation: slideIn 0.2s ease-out;
+  
+  @keyframes slideIn {
+    from {
+      opacity: 0;
+      transform: translateY(-20px) scale(0.95);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+`;
+
+const DeleteModalHeader = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 20px;
+  
+  .icon-wrapper {
+    width: 56px;
+    height: 56px;
+    border-radius: 14px;
+    background: #fef2f2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    
+    svg {
+      color: #ef4444;
+      width: 28px;
+      height: 28px;
+    }
+  }
+  
+  h3 {
+    font-size: 22px;
+    font-weight: 700;
+    color: #0f172a;
+    margin: 0;
+    flex: 1;
+  }
+`;
+
+const DeleteModalBody = styled.div`
+  margin-bottom: 24px;
+  
+  p {
+    font-size: 15px;
+    color: #475569;
+    line-height: 1.6;
+    margin: 0 0 12px 0;
+  }
+  
+  .task-title {
+    background: #f8fafc;
+    padding: 12px 16px;
+    border-radius: 10px;
+    border: 1px solid #e2e8f0;
+    font-weight: 600;
+    color: #0f172a;
+    font-size: 14px;
+    margin-top: 12px;
+  }
+`;
+
+const DeleteModalActions = styled.div`
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+`;
+
+const DeleteModalButton = styled.button`
+  padding: 12px 24px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  
+  &.cancel {
+    background: #f1f5f9;
+    color: #475569;
+    
+    &:hover {
+      background: #e2e8f0;
+      color: #334155;
+    }
+  }
+  
+  &.confirm {
+    background: linear-gradient(135deg, #ef4444, #dc2626);
+    color: white;
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
+    
+    &:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 16px rgba(239, 68, 68, 0.4);
+    }
+    
+    &:active {
+      transform: translateY(0);
+    }
+  }
+  
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  
+  svg {
+    width: 16px;
+    height: 16px;
+  }
+`;
+
+const AssignModal = styled.div`
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  padding: 20px;
+`;
+
+const AssignModalContent = styled.div`
+  background: white;
+  border-radius: 20px;
+  padding: 32px;
+  max-width: 520px;
+  width: 100%;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  position: relative;
+  animation: slideIn 0.2s ease-out;
+  
+  @keyframes slideIn {
+    from {
+      opacity: 0;
+      transform: translateY(-20px) scale(0.95);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+`;
+
+const AssignModalHeader = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 24px;
+  
+  .icon-wrapper {
+    width: 56px;
+    height: 56px;
+    border-radius: 14px;
+    background: #f3e8ff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    
+    svg {
+      color: #7c3aed;
+      width: 28px;
+      height: 28px;
+    }
+  }
+  
+  h3 {
+    font-size: 22px;
+    font-weight: 700;
+    color: #0f172a;
+    margin: 0;
+    flex: 1;
+  }
+`;
+
+const AssignModalBody = styled.div`
+  margin-bottom: 24px;
+  
+  .task-info {
+    background: #f8fafc;
+    padding: 16px;
+    border-radius: 12px;
+    border: 1px solid #e2e8f0;
+    margin-bottom: 20px;
+    
+    .task-title {
+      font-weight: 600;
+      color: #0f172a;
+      font-size: 15px;
+      margin-bottom: 4px;
+    }
+    
+    .current-assignee {
+      font-size: 13px;
+      color: #64748b;
+      margin-top: 8px;
+    }
+  }
+  
+  .search-wrapper {
+    position: relative;
+    margin-bottom: 16px;
+    
+    svg {
+      position: absolute;
+      left: 16px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #94a3b8;
+      pointer-events: none;
+    }
+    
+    input {
+      width: 100%;
+      padding: 12px 16px 12px 44px;
+      border: 2px solid #e2e8f0;
+      border-radius: 12px;
+      font-size: 14px;
+      color: #0f172a;
+      transition: all 0.2s ease;
+      background: white;
+      
+      &:focus {
+        outline: none;
+        border-color: #7c3aed;
+        box-shadow: 0 0 0 4px rgba(124, 58, 237, 0.1);
+      }
+      
+      &::placeholder {
+        color: #94a3b8;
+      }
+    }
+  }
+  
+  .users-list {
+    max-height: 300px;
+    overflow-y: auto;
+    border: 2px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 8px;
+    
+    &::-webkit-scrollbar {
+      width: 8px;
+    }
+    
+    &::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    
+    &::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 4px;
+      
+      &:hover {
+        background: #94a3b8;
+      }
+    }
+  }
+`;
+
+const UserOption = styled.button`
+  width: 100%;
+  padding: 14px 16px;
+  border: 2px solid ${props => props.selected ? '#7c3aed' : '#e2e8f0'};
+  border-radius: 10px;
+  background: ${props => props.selected ? '#f3e8ff' : 'white'};
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+  
+  &:last-child {
+    margin-bottom: 0;
+  }
+  
+  &:hover {
+    border-color: ${props => props.selected ? '#7c3aed' : '#a78bfa'};
+    background: ${props => props.selected ? '#f3e8ff' : '#faf5ff'};
+    transform: translateX(2px);
+  }
+  
+  .avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: 600;
+    font-size: 14px;
+    flex-shrink: 0;
+  }
+  
+  .info {
+    flex: 1;
+    min-width: 0;
+    
+    .name {
+      font-weight: 600;
+      color: #0f172a;
+      font-size: 14px;
+      margin-bottom: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    
+    .email {
+      font-size: 12px;
+      color: #64748b;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+  }
+  
+  .check {
+    color: #7c3aed;
+    flex-shrink: 0;
+  }
+`;
+
+const AssignModalActions = styled.div`
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+`;
+
+const AssignModalButton = styled.button`
+  padding: 12px 24px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  
+  &.cancel {
+    background: #f1f5f9;
+    color: #475569;
+    
+    &:hover {
+      background: #e2e8f0;
+      color: #334155;
+    }
+  }
+  
+  &.confirm {
+    background: linear-gradient(135deg, #7c3aed, #6d28d9);
+    color: white;
+    box-shadow: 0 4px 12px rgba(124, 58, 237, 0.3);
+    
+    &:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 16px rgba(124, 58, 237, 0.4);
+    }
+    
+    &:active {
+      transform: translateY(0);
+    }
+  }
+  
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  
+  svg {
+    width: 16px;
+    height: 16px;
+  }
+`;
+
 const TaskManagement = () => {
   const { user } = useAuth();
-  const [tasks, setTasks] = useState([]);
+  const { tasks, setTasks, isLoading: tasksLoading } = useTasks();
   const [newTask, setNewTask] = useState('');
   const [newDescription, setNewDescription] = useState('');
   const [newPriority, setNewPriority] = useState('medium');
@@ -972,6 +1521,33 @@ const TaskManagement = () => {
   const [selectedTask, setSelectedTask] = useState(null);
   const [editForm, setEditForm] = useState({ title: '', description: '', priority: 'medium', status: 'pending' });
   const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [taskToDelete, setTaskToDelete] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [showAssignModal, setShowAssignModal] = useState(false);
+  const [taskToAssign, setTaskToAssign] = useState(null);
+  const [users, setUsers] = useState([]);
+  const [selectedAssignees, setSelectedAssignees] = useState([]);
+  const [isAssigning, setIsAssigning] = useState(false);
+  const [userSearchQuery, setUserSearchQuery] = useState('');
+
+  // Permission checking helper
+  const hasPermission = (permission) => {
+    if (!user || !user.permissions) return false;
+    
+    // Admin role always has access
+    if (user.roles && user.roles.includes('admin')) {
+      return true;
+    }
+    
+    // Check if user has the permission
+    return user.permissions.includes(permission) || user.permissions.includes('admin.access');
+  };
+
+  const canCreate = hasPermission('tasks.create');
+  const canUpdate = hasPermission('tasks.update');
+  const canDelete = hasPermission('tasks.delete');
+  const canAssign = hasPermission('tasks.assign');
 
   const addQuillRef = useRef(null);
   const editQuillRef = useRef(null);
@@ -1072,19 +1648,22 @@ const TaskManagement = () => {
     }
   }), [editImageHandler]);
 
-  useEffect(() => {
-    loadTasks();
-  }, []);
+  // Tasks are now loaded and updated in real-time via TasksContext
+  // No need to fetch on mount - context handles it
 
-  const loadTasks = async () => {
+  useEffect(() => {
+    if (showAssignModal && canAssign) {
+      fetchUsers();
+    }
+  }, [showAssignModal, canAssign]);
+
+  const fetchUsers = async () => {
     try {
-      setIsLoading(true);
-      const response = await tasksAPI.getTasks();
-      setTasks(response.data.tasks);
+      const response = await adminAPI.listUsers();
+      setUsers(response.data.users || []);
     } catch (error) {
-      toast.error('Failed to load tasks');
-    } finally {
-      setIsLoading(false);
+      console.error('Failed to load users:', error);
+      toast.error('Failed to load users');
     }
   };
 
@@ -1197,61 +1776,189 @@ const TaskManagement = () => {
 
   const renderTaskActions = (columnStatus, task) => (
     <KanbanTaskActions>
-      {columnStatus === 'pending' && (
+      {canUpdate && (
         <>
-          <KanbanIconButton
-            onClick={(e) => handleStatusChange(e, task, 'in-progress')}
-            title="Mark as in progress"
-            aria-label="Mark as in progress"
+          {columnStatus === 'pending' && (
+            <KanbanIconButton
+              onClick={(e) => handleStatusChange(e, task, 'in-progress')}
+              title="Start task"
+              aria-label="Start task"
+            >
+              <PlayCircle />
+            </KanbanIconButton>
+          )}
+          {columnStatus !== 'completed' && (
+            <KanbanIconButton
+              completed
+              onClick={(e) => handleStatusChange(e, task, 'completed')}
+              title="Mark as completed"
+              aria-label="Mark as completed"
+            >
+              <CheckCircle2 />
+            </KanbanIconButton>
+          )}
+          {columnStatus === 'completed' && (
+            <KanbanIconButton
+              onClick={(e) => handleStatusChange(e, task, 'in-progress')}
+              title="Reopen task"
+              aria-label="Reopen task"
+            >
+              <RotateCcw />
+            </KanbanIconButton>
+          )}
+          <KanbanIconButton 
+            edit 
+            onClick={(e) => { 
+              e.stopPropagation(); 
+              openEditModal(task); 
+            }}
+            title="Edit task"
+            aria-label="Edit task"
           >
-            🚀
-          </KanbanIconButton>
-          <KanbanIconButton
-            onClick={(e) => handleStatusChange(e, task, 'completed')}
-            title="Mark as completed"
-            aria-label="Mark as completed"
-          >
-            ✅
+            <Edit />
           </KanbanIconButton>
         </>
       )}
-      {columnStatus === 'in-progress' && (
-        <KanbanIconButton
-          onClick={(e) => handleStatusChange(e, task, 'completed')}
-          title="Mark as completed"
-          aria-label="Mark as completed"
+      {canAssign && (
+        <KanbanIconButton 
+          assign
+          onClick={(e) => { 
+            e.stopPropagation(); 
+            handleAssignTask(task); 
+          }}
+          title="Assign task"
+          aria-label="Assign task"
         >
-          ✅
+          <UserPlus />
         </KanbanIconButton>
       )}
-      {columnStatus === 'completed' && (
-        <KanbanIconButton
-          onClick={(e) => handleStatusChange(e, task, 'in-progress')}
-          title="Mark as in progress"
-          aria-label="Mark as in progress"
+      {canDelete && (
+        <KanbanIconButton 
+          danger 
+          onClick={(e) => { 
+            e.stopPropagation(); 
+            setTaskToDelete(task);
+            setShowDeleteModal(true);
+          }}
+          title="Delete task"
+          aria-label="Delete task"
         >
-          🔄
+          <Trash2 />
         </KanbanIconButton>
       )}
-      <KanbanIconButton edit onClick={(e) => { e.stopPropagation(); openEditModal(task); }}>
-        ✏️
-      </KanbanIconButton>
-      <KanbanIconButton danger onClick={(e) => { e.stopPropagation(); deleteTask(task._id); }}>
-        🗑️
-      </KanbanIconButton>
     </KanbanTaskActions>
   );
 
-  const deleteTask = async (taskId) => {
-    if (!window.confirm('Are you sure you want to delete this task?')) return;
+  const deleteTask = async () => {
+    if (!taskToDelete || isDeleting) return;
     
     try {
-      await tasksAPI.deleteTask(taskId);
-      setTasks(tasks.filter(t => t._id !== taskId));
+      setIsDeleting(true);
+      await tasksAPI.deleteTask(taskToDelete._id);
+      setTasks(tasks.filter(t => t._id !== taskToDelete._id));
+      setShowDeleteModal(false);
+      setTaskToDelete(null);
       toast.success('Task deleted successfully!');
     } catch (error) {
       toast.error('Failed to delete task');
+    } finally {
+      setIsDeleting(false);
     }
+  };
+
+  const cancelDelete = () => {
+    if (isDeleting) return;
+    setShowDeleteModal(false);
+    setTaskToDelete(null);
+  };
+
+  const handleAssignTask = (task) => {
+    setTaskToAssign(task);
+    // Get current assignees - prefer assignees array, fallback to user
+    const currentAssignees = task.assignees && task.assignees.length > 0 
+      ? task.assignees.map(a => a._id || a).filter(Boolean)
+      : (task.user ? [task.user._id || task.user].filter(Boolean) : []);
+    // Pre-select all current assignees
+    setSelectedAssignees(currentAssignees);
+    setUserSearchQuery('');
+    setShowAssignModal(true);
+  };
+
+  const cancelAssign = () => {
+    if (isAssigning) return;
+    setShowAssignModal(false);
+    setTaskToAssign(null);
+    setSelectedAssignees([]);
+    setUserSearchQuery('');
+  };
+
+  const toggleAssignee = (userId) => {
+    setSelectedAssignees(prev => {
+      const userIdStr = userId.toString();
+      if (prev.some(id => id.toString() === userIdStr)) {
+        // Remove assignee
+        return prev.filter(id => id.toString() !== userIdStr);
+      } else {
+        // Add assignee
+        return [...prev, userId];
+      }
+    });
+  };
+
+  const confirmAssign = async () => {
+    if (!taskToAssign || isAssigning) return;
+
+    try {
+      setIsAssigning(true);
+      const response = await tasksAPI.assignTask(taskToAssign._id, selectedAssignees);
+      
+      // Update the task in the tasks list
+      setTasks(tasks.map(t => 
+        t._id === taskToAssign._id ? response.data.task : t
+      ));
+      
+      setShowAssignModal(false);
+      setTaskToAssign(null);
+      setSelectedAssignees([]);
+      setUserSearchQuery('');
+      toast.success(selectedAssignees.length > 0 
+        ? `Task assigned to ${selectedAssignees.length} user(s) successfully!`
+        : 'All assignees removed from task');
+    } catch (error) {
+      console.error('Failed to assign task:', error);
+      toast.error(error.response?.data?.message || 'Failed to update task assignees');
+    } finally {
+      setIsAssigning(false);
+    }
+  };
+
+  const getUserInitials = (user) => {
+    if (!user) return '?';
+    const firstName = user.firstName || '';
+    const lastName = user.lastName || '';
+    if (firstName && lastName) {
+      return `${firstName[0]}${lastName[0]}`.toUpperCase();
+    }
+    return (user.email || '?')[0].toUpperCase();
+  };
+
+  const getUserDisplayName = (user) => {
+    if (!user) return 'Unassigned';
+    if (user.firstName && user.lastName) {
+      return `${user.firstName} ${user.lastName}`;
+    }
+    return user.email || 'Unknown';
+  };
+
+  const getFilteredUsers = () => {
+    if (!userSearchQuery) return users;
+    const query = userSearchQuery.toLowerCase();
+    return users.filter(u => 
+      (u.firstName && u.firstName.toLowerCase().includes(query)) ||
+      (u.lastName && u.lastName.toLowerCase().includes(query)) ||
+      (u.email && u.email.toLowerCase().includes(query)) ||
+      getUserDisplayName(u).toLowerCase().includes(query)
+    );
   };
 
   const openEditModal = (task) => {
@@ -1360,9 +2067,11 @@ const TaskManagement = () => {
         <MainContent>
           <HeaderActions>
             <PageTitle>My Tasks</PageTitle>
-            <AddTaskButton onClick={() => setShowAddModal(true)}>
-              Add New Task
-            </AddTaskButton>
+            {canCreate && (
+              <AddTaskButton onClick={() => setShowAddModal(true)}>
+                Add New Task
+              </AddTaskButton>
+            )}
           </HeaderActions>
 
           <DragDropContext onDragEnd={handleDragEnd}>
@@ -1404,25 +2113,53 @@ const TaskManagement = () => {
                                     data-dragging={dragSnapshot.isDragging}
                   >
                     <KanbanTaskHeader>
-                                      <KanbanTaskTitle completed={isCompletedColumn}>{task.title}</KanbanTaskTitle>
-                      <KanbanTaskPriority priority={task.priority} />
+                      <KanbanTaskTitle completed={isCompletedColumn}>{task.title}</KanbanTaskTitle>
+                      <KanbanTaskMeta>
+                        <KanbanTaskPriorityBadge priority={task.priority}>
+                          {task.priority}
+                        </KanbanTaskPriorityBadge>
+                        {(task.assignees && task.assignees.length > 0) || task.user ? (
+                          <KanbanTaskAssignee>
+                            {(() => {
+                              // Get assignees - prefer assignees array, fallback to user
+                              const assignees = task.assignees && task.assignees.length > 0 
+                                ? task.assignees 
+                                : (task.user ? [task.user] : []);
+                              
+                              // Show first 2 assignees, then count for rest
+                              const visibleAssignees = assignees.slice(0, 2);
+                              const remainingCount = assignees.length - 2;
+                              
+                              return (
+                                <>
+                                  {visibleAssignees.map((assignee, idx) => (
+                                    <div key={idx} className="assignee-item" title={getUserDisplayName(assignee)}>
+                                      <div className="avatar">
+                                        {getUserInitials(assignee)}
+                                      </div>
+                                      {idx === 0 && assignees.length === 1 && (
+                                        <span>{getUserDisplayName(assignee)}</span>
+                                      )}
+                                    </div>
+                                  ))}
+                                  {remainingCount > 0 && (
+                                    <span className="more-count">+{remainingCount}</span>
+                                  )}
+                                </>
+                              );
+                            })()}
+                          </KanbanTaskAssignee>
+                        ) : null}
+                      </KanbanTaskMeta>
                     </KanbanTaskHeader>
-                                    {descriptionHtml && (
-                                      <div
-                                        style={{
-                                          fontSize: '12px',
-                                          color: '#64748b',
-                                          marginTop: '8px',
-                                          ...(isCompletedColumn ? { opacity: 0.7 } : {})
-                                        }}
-                                        dangerouslySetInnerHTML={{ __html: descriptionHtml }}
-                                      />
+                    {descriptionHtml && (
+                      <KanbanTaskDescription
+                        dangerouslySetInnerHTML={{ __html: descriptionHtml }}
+                        style={isCompletedColumn ? { opacity: 0.7 } : {}}
+                      />
                     )}
                     <KanbanTaskFooter>
-                      <TaskBadge type="priority" value={task.priority}>
-                        {task.priority}
-                      </TaskBadge>
-                                      {renderTaskActions(column.status, task)}
+                      {renderTaskActions(column.status, task)}
                     </KanbanTaskFooter>
                   </KanbanTask>
                                 )}
@@ -1719,6 +2456,221 @@ const TaskManagement = () => {
             </div>
           </ModalContent>
         </Modal>
+      )}
+
+      {showDeleteModal && taskToDelete && (
+        <DeleteModal onClick={cancelDelete}>
+          <DeleteModalContent onClick={(e) => e.stopPropagation()}>
+            <DeleteModalHeader>
+              <div className="icon-wrapper">
+                <AlertTriangle />
+              </div>
+              <h3>Delete Task</h3>
+            </DeleteModalHeader>
+            <DeleteModalBody>
+              <p>Are you sure you want to delete this task? This action cannot be undone.</p>
+              <div className="task-title">
+                {taskToDelete.title}
+              </div>
+            </DeleteModalBody>
+            <DeleteModalActions>
+              <DeleteModalButton
+                className="cancel"
+                onClick={cancelDelete}
+                disabled={isDeleting}
+              >
+                <X />
+                Cancel
+              </DeleteModalButton>
+              <DeleteModalButton
+                className="confirm"
+                onClick={deleteTask}
+                disabled={isDeleting}
+              >
+                {isDeleting ? (
+                  <>
+                    <div style={{ 
+                      width: '16px', 
+                      height: '16px', 
+                      border: '2px solid rgba(255,255,255,0.3)', 
+                      borderTopColor: 'white', 
+                      borderRadius: '50%', 
+                      animation: 'spin 0.8s linear infinite' 
+                    }} />
+                    Deleting...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 />
+                    Delete Task
+                  </>
+                )}
+              </DeleteModalButton>
+            </DeleteModalActions>
+          </DeleteModalContent>
+        </DeleteModal>
+      )}
+
+      {showAssignModal && taskToAssign && (
+        <AssignModal onClick={cancelAssign}>
+          <AssignModalContent onClick={(e) => e.stopPropagation()}>
+            <AssignModalHeader>
+              <div className="icon-wrapper">
+                <UserPlus />
+              </div>
+              <h3>Assign Task</h3>
+            </AssignModalHeader>
+            <AssignModalBody>
+              <div className="task-info">
+                <div className="task-title">{taskToAssign.title}</div>
+                {selectedAssignees.length > 0 && (
+                  <div className="current-assignee" style={{ marginTop: '12px', padding: '12px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                    <div style={{ fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '8px' }}>
+                      Selected Assignees ({selectedAssignees.length}):
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                      {selectedAssignees.map((assigneeId, idx) => {
+                        const assignee = users.find(u => u._id.toString() === assigneeId.toString());
+                        if (!assignee) return null;
+                        return (
+                          <div
+                            key={idx}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              padding: '6px 10px',
+                              background: 'white',
+                              borderRadius: '6px',
+                              border: '1px solid #e2e8f0',
+                              fontSize: '12px'
+                            }}
+                          >
+                            <div style={{
+                              width: '20px',
+                              height: '20px',
+                              borderRadius: '6px',
+                              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              color: 'white',
+                              fontWeight: 600,
+                              fontSize: '9px'
+                            }}>
+                              {getUserInitials(assignee)}
+                            </div>
+                            <span style={{ color: '#0f172a', fontWeight: 500 }}>
+                              {getUserDisplayName(assignee)}
+                            </span>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleAssignee(assigneeId);
+                              }}
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                color: '#ef4444',
+                                cursor: 'pointer',
+                                padding: '2px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                marginLeft: '4px'
+                              }}
+                              title="Remove assignee"
+                            >
+                              <X size={14} />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+              
+              <div className="search-wrapper">
+                <Search size={18} />
+                <input
+                  type="text"
+                  placeholder="Search users..."
+                  value={userSearchQuery}
+                  onChange={(e) => setUserSearchQuery(e.target.value)}
+                />
+              </div>
+
+              <div className="users-list">
+                {getFilteredUsers().length === 0 ? (
+                  <div style={{ 
+                    padding: '40px 20px', 
+                    textAlign: 'center', 
+                    color: '#94a3b8',
+                    fontSize: '14px'
+                  }}>
+                    {userSearchQuery ? 'No users found' : 'No users available'}
+                  </div>
+                ) : (
+                  getFilteredUsers().map(u => {
+                    const isSelected = selectedAssignees.some(id => id.toString() === u._id.toString());
+                    return (
+                      <UserOption
+                        key={u._id}
+                        selected={isSelected}
+                        onClick={() => toggleAssignee(u._id)}
+                      >
+                        <div className="avatar">
+                          {getUserInitials(u)}
+                        </div>
+                        <div className="info">
+                          <div className="name">{getUserDisplayName(u)}</div>
+                          <div className="email">{u.email}</div>
+                        </div>
+                        {isSelected && (
+                          <CheckCircle2 className="check" size={20} />
+                        )}
+                      </UserOption>
+                    );
+                  })
+                )}
+              </div>
+            </AssignModalBody>
+            <AssignModalActions>
+              <AssignModalButton
+                className="cancel"
+                onClick={cancelAssign}
+                disabled={isAssigning}
+              >
+                <X />
+                Cancel
+              </AssignModalButton>
+              <AssignModalButton
+                className="confirm"
+                onClick={confirmAssign}
+                disabled={isAssigning}
+              >
+                {isAssigning ? (
+                  <>
+                    <div style={{ 
+                      width: '16px', 
+                      height: '16px', 
+                      border: '2px solid rgba(255,255,255,0.3)', 
+                      borderTopColor: 'white', 
+                      borderRadius: '50%', 
+                      animation: 'spin 0.8s linear infinite' 
+                    }} />
+                    Assigning...
+                  </>
+                ) : (
+                  <>
+                    <UserPlus />
+                    {selectedAssignees.length > 0 ? 'Update Assignees' : 'Remove All Assignees'}
+                  </>
+                )}
+              </AssignModalButton>
+            </AssignModalActions>
+          </AssignModalContent>
+        </AssignModal>
       )}
     </Container>
   );

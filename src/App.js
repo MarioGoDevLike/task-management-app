@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { TasksProvider } from './contexts/TasksContext';
 import LoginPage from './components/LoginPage';
 import ProtectedRoute from './components/ProtectedRoute';
 import TaskManagement from './components/TaskManagement';
@@ -42,10 +43,11 @@ const AppContent = () => {
 function App() {
   return (
     <AuthProvider>
-      <Router>
-      <div className="App">
-        <AppContent />
-        <Toaster 
+      <TasksProvider>
+        <Router>
+        <div className="App">
+          <AppContent />
+          <Toaster 
           position="top-right"
           toastOptions={{
             duration: 4000,
@@ -73,8 +75,9 @@ function App() {
             },
           }}
         />
-      </div>
-      </Router>
+        </div>
+        </Router>
+      </TasksProvider>
     </AuthProvider>
   );
 }

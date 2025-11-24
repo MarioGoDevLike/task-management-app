@@ -18,6 +18,8 @@ import {
   TrendingUp,
   Users,
   FileText,
+  Eye,
+  Tag,
 } from 'lucide-react';
 import { adminAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
@@ -101,46 +103,73 @@ const StatLabel = styled.div`
 `;
 
 const FiltersBar = styled.div`
-  background: white;
+  background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
   border-radius: 16px;
-  padding: 20px 24px;
+  padding: 24px;
   margin-bottom: 24px;
   border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
   display: flex;
   flex-wrap: wrap;
   gap: 16px;
+  align-items: flex-end;
+`;
+
+const FilterGroup = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: ${props => props.flex || '0 0 auto'};
+  min-width: ${props => props.minWidth || '150px'};
+`;
+
+const FilterLabel = styled.label`
+  font-size: 12px;
+  font-weight: 600;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  display: flex;
   align-items: center;
+  gap: 6px;
 `;
 
 const SearchInput = styled.div`
   flex: 1;
-  min-width: 250px;
+  min-width: 280px;
   position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   
   input {
     width: 100%;
-    padding: 12px 16px 12px 44px;
-    border: 1.5px solid #e2e8f0;
-    border-radius: 10px;
+    padding: 14px 16px 14px 48px;
+    border: 2px solid #e2e8f0;
+    border-radius: 12px;
     font-size: 14px;
     color: #0f172a;
+    background: white;
     transition: all 0.2s ease;
+    font-weight: 500;
     
     &:focus {
       outline: none;
       border-color: #3b82f6;
-      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+      box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
+      background: #ffffff;
     }
     
     &::placeholder {
       color: #94a3b8;
+      font-weight: 400;
     }
   }
   
   svg {
     position: absolute;
-    left: 14px;
-    top: 50%;
+    left: 16px;
+    top: calc(50% + 4px);
     transform: translateY(-50%);
     color: #94a3b8;
     pointer-events: none;
@@ -148,20 +177,60 @@ const SearchInput = styled.div`
 `;
 
 const Select = styled.select`
-  padding: 12px 16px;
-  border: 1.5px solid #e2e8f0;
-  border-radius: 10px;
+  padding: 14px 16px;
+  border: 2px solid #e2e8f0;
+  border-radius: 12px;
   font-size: 14px;
   color: #0f172a;
   background: white;
   cursor: pointer;
   transition: all 0.2s ease;
-  min-width: 150px;
+  font-weight: 500;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23475569' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 16px center;
+  padding-right: 40px;
   
   &:focus {
     outline: none;
     border-color: #3b82f6;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+    box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
+  }
+  
+  &:hover {
+    border-color: #cbd5e1;
+  }
+  
+  option {
+    padding: 12px;
+    font-weight: 500;
+  }
+`;
+
+const ClearFiltersButton = styled.button`
+  padding: 14px 20px;
+  border: 2px solid #e2e8f0;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #64748b;
+  background: white;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+  
+  &:hover {
+    border-color: #ef4444;
+    color: #ef4444;
+    background: #fef2f2;
+  }
+  
+  &:active {
+    transform: scale(0.98);
   }
 `;
 
@@ -327,7 +396,7 @@ const ModalContent = styled.div`
   background: white;
   border-radius: 16px;
   padding: 24px;
-  max-width: 500px;
+  max-width: ${props => props.large ? '700px' : '500px'};
   width: 100%;
   max-height: 90vh;
   overflow-y: auto;
@@ -505,6 +574,90 @@ const PaginationButton = styled.button`
   }
 `;
 
+const TaskPreviewSection = styled.div`
+  margin-bottom: 24px;
+  
+  &:last-child {
+    margin-bottom: 0;
+  }
+  
+  .label {
+    font-size: 12px;
+    font-weight: 700;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  
+  .value {
+    font-size: 15px;
+    color: #0f172a;
+    line-height: 1.6;
+  }
+  
+  .description {
+    background: #f8fafc;
+    padding: 16px;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+  }
+  
+  .tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 12px;
+    background: #eff6ff;
+    color: #2563eb;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+  }
+  
+  .info-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 0;
+    border-bottom: 1px solid #f1f5f9;
+    
+    &:last-child {
+      border-bottom: none;
+    }
+  }
+  
+  .info-label {
+    font-size: 14px;
+    color: #64748b;
+    min-width: 120px;
+    font-weight: 500;
+  }
+  
+  .info-value {
+    font-size: 14px;
+    color: #0f172a;
+    font-weight: 500;
+  }
+`;
+
+const ActionButtonsGroup = styled.div`
+  display: flex;
+  gap: 8px;
+  align-items: center;
+`;
+
 const AdminDashboard = () => {
   const { user } = useAuth();
   const [tasks, setTasks] = useState([]);
@@ -518,6 +671,7 @@ const AdminDashboard = () => {
     priority: '',
     userId: '',
   });
+  const [searchInput, setSearchInput] = useState('');
   const [sortBy, setSortBy] = useState('createdAt');
   const [sortOrder, setSortOrder] = useState('desc');
   const [page, setPage] = useState(1);
@@ -526,6 +680,8 @@ const AdminDashboard = () => {
   const [selectedTask, setSelectedTask] = useState(null);
   const [assigningUserId, setAssigningUserId] = useState(null);
   const [isAssigning, setIsAssigning] = useState(false);
+  const [showPreviewModal, setShowPreviewModal] = useState(false);
+  const [previewTask, setPreviewTask] = useState(null);
 
   const limit = 20;
 
@@ -537,6 +693,16 @@ const AdminDashboard = () => {
   useEffect(() => {
     fetchTasks();
   }, [filters, sortBy, sortOrder, page]);
+
+  // Debounce search input
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setFilters(prev => ({ ...prev, search: searchInput }));
+      setPage(1);
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [searchInput]);
 
   const fetchUsers = async () => {
     try {
@@ -586,6 +752,11 @@ const AdminDashboard = () => {
     setSelectedTask(task);
     setAssigningUserId(task.user?._id || null);
     setShowAssignModal(true);
+  };
+
+  const handlePreviewTask = (task) => {
+    setPreviewTask(task);
+    setShowPreviewModal(true);
   };
 
   const handleConfirmAssign = async () => {
@@ -668,6 +839,29 @@ const AdminDashboard = () => {
     return user.email || 'Unknown';
   };
 
+  const stripHtmlTags = (html) => {
+    if (!html) return '';
+    // Create a temporary DOM element to extract text content
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    return tmp.textContent || tmp.innerText || '';
+  };
+
+  const hasActiveFilters = () => {
+    return filters.search || filters.status || filters.priority || filters.userId;
+  };
+
+  const clearAllFilters = () => {
+    setFilters({
+      search: '',
+      status: '',
+      priority: '',
+      userId: '',
+    });
+    setSearchInput('');
+    setPage(1);
+  };
+
   if (!user?.roles?.includes('admin')) {
     return (
       <DashboardContainer>
@@ -737,57 +931,85 @@ const AdminDashboard = () => {
 
       <FiltersBar>
         <SearchInput>
-          <Search size={18} />
+          <FilterLabel>
+            <Search size={14} />
+            Search Tasks
+          </FilterLabel>
           <input
             type="text"
-            placeholder="Search tasks by title or description..."
-            value={filters.search}
-            onChange={(e) => {
-              setFilters(prev => ({ ...prev, search: e.target.value }));
-              setPage(1);
-            }}
+            placeholder="Search by title or description..."
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
           />
         </SearchInput>
-        <Select
-          value={filters.status}
-          onChange={(e) => {
-            setFilters(prev => ({ ...prev, status: e.target.value }));
-            setPage(1);
-          }}
-        >
-          <option value="">All Statuses</option>
-          <option value="pending">Pending</option>
-          <option value="in-progress">In Progress</option>
-          <option value="completed">Completed</option>
-          <option value="cancelled">Cancelled</option>
-        </Select>
-        <Select
-          value={filters.priority}
-          onChange={(e) => {
-            setFilters(prev => ({ ...prev, priority: e.target.value }));
-            setPage(1);
-          }}
-        >
-          <option value="">All Priorities</option>
-          <option value="low">Low</option>
-          <option value="medium">Medium</option>
-          <option value="high">High</option>
-          <option value="urgent">Urgent</option>
-        </Select>
-        <Select
-          value={filters.userId}
-          onChange={(e) => {
-            setFilters(prev => ({ ...prev, userId: e.target.value }));
-            setPage(1);
-          }}
-        >
-          <option value="">All Users</option>
-          {users.map(u => (
-            <option key={u._id} value={u._id}>
-              {getUserDisplayName(u)}
-            </option>
-          ))}
-        </Select>
+        
+        <FilterGroup minWidth="160px">
+          <FilterLabel>
+            <Filter size={14} />
+            Status
+          </FilterLabel>
+          <Select
+            value={filters.status}
+            onChange={(e) => {
+              setFilters(prev => ({ ...prev, status: e.target.value }));
+              setPage(1);
+            }}
+          >
+            <option value="">All Statuses</option>
+            <option value="pending">Pending</option>
+            <option value="in-progress">In Progress</option>
+            <option value="completed">Completed</option>
+            <option value="cancelled">Cancelled</option>
+          </Select>
+        </FilterGroup>
+
+        <FilterGroup minWidth="160px">
+          <FilterLabel>
+            <AlertCircle size={14} />
+            Priority
+          </FilterLabel>
+          <Select
+            value={filters.priority}
+            onChange={(e) => {
+              setFilters(prev => ({ ...prev, priority: e.target.value }));
+              setPage(1);
+            }}
+          >
+            <option value="">All Priorities</option>
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+            <option value="urgent">Urgent</option>
+          </Select>
+        </FilterGroup>
+
+        <FilterGroup minWidth="180px">
+          <FilterLabel>
+            <User size={14} />
+            Assigned To
+          </FilterLabel>
+          <Select
+            value={filters.userId}
+            onChange={(e) => {
+              setFilters(prev => ({ ...prev, userId: e.target.value }));
+              setPage(1);
+            }}
+          >
+            <option value="">All Users</option>
+            {users.map(u => (
+              <option key={u._id} value={u._id}>
+                {getUserDisplayName(u)}
+              </option>
+            ))}
+          </Select>
+        </FilterGroup>
+
+        {hasActiveFilters() && (
+          <ClearFiltersButton onClick={clearAllFilters}>
+            <XCircle size={16} />
+            Clear Filters
+          </ClearFiltersButton>
+        )}
       </FiltersBar>
 
       <TasksTable>
@@ -836,9 +1058,6 @@ const AdminDashboard = () => {
               <TableRow key={task._id}>
                 <TaskTitle>
                   {task.title}
-                  {task.description && (
-                    <div className="description">{task.description}</div>
-                  )}
                 </TaskTitle>
                 <UserBadge>
                   <div className="avatar">
@@ -864,10 +1083,16 @@ const AdminDashboard = () => {
                   {new Date(task.createdAt).toLocaleDateString()}
                 </div>
                 <div>
-                  <ActionButton onClick={() => handleAssignTask(task)}>
-                    <UserPlus size={14} />
-                    Assign
-                  </ActionButton>
+                  <ActionButtonsGroup>
+                    <ActionButton onClick={() => handlePreviewTask(task)}>
+                      <Eye size={14} />
+                      Preview
+                    </ActionButton>
+                    <ActionButton onClick={() => handleAssignTask(task)}>
+                      <UserPlus size={14} />
+                      Assign
+                    </ActionButton>
+                  </ActionButtonsGroup>
                 </div>
               </TableRow>
             ))}
@@ -983,6 +1208,163 @@ const AdminDashboard = () => {
                     Assign Task
                   </>
                 )}
+              </ActionButton>
+            </div>
+          </ModalContent>
+        </ModalOverlay>
+      )}
+
+      {showPreviewModal && previewTask && (
+        <ModalOverlay onClick={() => setShowPreviewModal(false)}>
+          <ModalContent large onClick={(e) => e.stopPropagation()}>
+            <ModalHeader>
+              <h2>Task Preview</h2>
+              <button onClick={() => setShowPreviewModal(false)}>
+                <XCircle size={20} />
+              </button>
+            </ModalHeader>
+
+            <TaskPreviewSection>
+              <div className="label">
+                <FileText size={14} />
+                Title
+              </div>
+              <div className="value" style={{ fontSize: '20px', fontWeight: 700, marginBottom: '16px' }}>
+                {previewTask.title}
+              </div>
+            </TaskPreviewSection>
+
+            {previewTask.description && (
+              <TaskPreviewSection>
+                <div className="label">
+                  <FileText size={14} />
+                  Description
+                </div>
+                <div className="value description">
+                  {stripHtmlTags(previewTask.description)}
+                </div>
+              </TaskPreviewSection>
+            )}
+
+            <TaskPreviewSection>
+              <div className="info-row">
+                <div className="info-label">Status:</div>
+                <div className="info-value">{getStatusBadge(previewTask.status)}</div>
+              </div>
+              <div className="info-row">
+                <div className="info-label">Priority:</div>
+                <div className="info-value">{getPriorityBadge(previewTask.priority)}</div>
+              </div>
+              <div className="info-row">
+                <div className="info-label">Assigned To:</div>
+                <div className="info-value">
+                  {previewTask.user ? (
+                    <UserBadge>
+                      <div className="avatar">
+                        {getUserInitials(previewTask.user)}
+                      </div>
+                      <div>
+                        <div style={{ fontWeight: 600, color: '#0f172a' }}>
+                          {getUserDisplayName(previewTask.user)}
+                        </div>
+                        {previewTask.user?.email && (
+                          <div style={{ fontSize: '12px', color: '#94a3b8' }}>
+                            {previewTask.user.email}
+                          </div>
+                        )}
+                      </div>
+                    </UserBadge>
+                  ) : (
+                    <span style={{ color: '#94a3b8' }}>Unassigned</span>
+                  )}
+                </div>
+              </div>
+              {previewTask.dueDate && (
+                <div className="info-row">
+                  <div className="info-label">
+                    <Calendar size={14} style={{ display: 'inline', marginRight: '6px' }} />
+                    Due Date:
+                  </div>
+                  <div className="info-value">
+                    {new Date(previewTask.dueDate).toLocaleDateString('en-US', {
+                      year: 'numeric',
+                      month: 'long',
+                      day: 'numeric'
+                    })}
+                  </div>
+                </div>
+              )}
+              <div className="info-row">
+                <div className="info-label">
+                  <Clock size={14} style={{ display: 'inline', marginRight: '6px' }} />
+                  Created:
+                </div>
+                <div className="info-value">
+                  {new Date(previewTask.createdAt).toLocaleDateString('en-US', {
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                  })}
+                </div>
+              </div>
+              {previewTask.updatedAt && (
+                <div className="info-row">
+                  <div className="info-label">
+                    <Clock size={14} style={{ display: 'inline', marginRight: '6px' }} />
+                    Last Updated:
+                  </div>
+                  <div className="info-value">
+                    {new Date(previewTask.updatedAt).toLocaleDateString('en-US', {
+                      year: 'numeric',
+                      month: 'long',
+                      day: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    })}
+                  </div>
+                </div>
+              )}
+              {previewTask.completedAt && (
+                <div className="info-row">
+                  <div className="info-label">
+                    <CheckCircle2 size={14} style={{ display: 'inline', marginRight: '6px' }} />
+                    Completed:
+                  </div>
+                  <div className="info-value">
+                    {new Date(previewTask.completedAt).toLocaleDateString('en-US', {
+                      year: 'numeric',
+                      month: 'long',
+                      day: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    })}
+                  </div>
+                </div>
+              )}
+            </TaskPreviewSection>
+
+            {previewTask.tags && previewTask.tags.length > 0 && (
+              <TaskPreviewSection>
+                <div className="label">
+                  <Tag size={14} />
+                  Tags
+                </div>
+                <div className="tags">
+                  {previewTask.tags.map((tag, index) => (
+                    <span key={index} className="tag">
+                      <Tag size={12} />
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              </TaskPreviewSection>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '24px', paddingTop: '24px', borderTop: '1px solid #e2e8f0' }}>
+              <ActionButton onClick={() => setShowPreviewModal(false)}>
+                Close
               </ActionButton>
             </div>
           </ModalContent>

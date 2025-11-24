@@ -53,6 +53,7 @@ export const tasksAPI = {
   createTask: (taskData) => api.post('/tasks', taskData),
   updateTask: (id, taskData) => api.put(`/tasks/${id}`, taskData),
   deleteTask: (id) => api.delete(`/tasks/${id}`),
+  assignTask: (taskId, assignees) => api.patch(`/tasks/${taskId}/assign`, { assignees }),
 };
 
 // Admin API
