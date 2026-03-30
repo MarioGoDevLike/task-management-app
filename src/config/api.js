@@ -4,9 +4,6 @@ export const DEFAULT_API_BASE_URL =
 
 /** Socket.io connects to origin only (no /api path) */
 export function getSocketOrigin() {
-  const base =
-    process.env.REACT_APP_SOCKET_URL ||
-    process.env.REACT_APP_API_URL ||
-    DEFAULT_API_BASE_URL;
+  const base = DEFAULT_API_BASE_URL;
   return String(base).replace(/\/api\/?$/, '');
 }
