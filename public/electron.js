@@ -31,9 +31,9 @@ function createWindow() {
     autoHideMenuBar: false
   });
 
-  // Load the app - build React app and serve from backend
-  const startUrl = isDev 
-    ? 'http://localhost:5000' 
+  // Dev: CRA (port 3000). Production: packaged build. API targets deployed backend via REACT_APP_* in the web bundle.
+  const startUrl = isDev
+    ? 'http://localhost:3000'
     : `file://${path.join(__dirname, '../build/index.html')}`;
   
   mainWindow.loadURL(startUrl);

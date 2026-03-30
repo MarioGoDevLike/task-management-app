@@ -3,6 +3,7 @@ import { io } from 'socket.io-client';
 import { tasksAPI } from '../services/api';
 import { useAuth } from './AuthContext';
 import { toast } from 'react-hot-toast';
+import { getSocketOrigin } from '../config/api';
 
 const TasksContext = createContext();
 
@@ -32,9 +33,9 @@ export const TasksProvider = ({ children }) => {
     }
 
     const token = localStorage.getItem('token');
-    const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
-    
-    const newSocket = io(API_URL, {
+    const socketUrl = getSocketOrigin();
+
+    const newSocket = io(socketUrl, {
       auth: { token },
       transports: ['websocket', 'polling']
     });
