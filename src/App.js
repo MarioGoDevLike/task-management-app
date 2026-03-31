@@ -6,6 +6,7 @@ import { TasksProvider } from './contexts/TasksContext';
 import LoginPage from './components/LoginPage';
 import ProtectedRoute from './components/ProtectedRoute';
 import TaskManagement from './components/TaskManagement';
+import CalendarPage from './components/CalendarPage';
 import SettingsPage from './components/SettingsPage';
 import AdminDashboard from './components/AdminDashboard';
 import DashboardLayout from './components/DashboardLayout';
@@ -20,7 +21,7 @@ const AppContent = () => {
 
   if (!isAuthenticated) {
     return (
-      <LoginPage 
+      <LoginPage
         onLogin={login}
       />
     );
@@ -31,6 +32,7 @@ const AppContent = () => {
       <Routes>
         <Route element={<DashboardLayout />}>
           <Route path="/" element={<TaskManagement />} />
+          <Route path="/calendar" element={<CalendarPage />} />
           <Route path="/admin" element={<AdminDashboard />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />

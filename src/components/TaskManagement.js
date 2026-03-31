@@ -5,6 +5,18 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTasks } from '../contexts/TasksContext';
 import { tasksAPI, adminAPI } from '../services/api';
 import { toast } from 'react-hot-toast';
+import { getDb } from '../firebase/app';
+import {
+  collection,
+  addDoc,
+  deleteDoc,
+  doc,
+  onSnapshot,
+  query,
+  serverTimestamp,
+  updateDoc,
+  where,
+} from 'firebase/firestore';
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
 import { 
@@ -17,7 +29,9 @@ import {
   X,
   UserPlus,
   Users,
-  Search
+  Search,
+  Columns3,
+  List
 } from 'lucide-react';
 
 const Container = styled.div`
@@ -129,14 +143,17 @@ const StatCard = styled.div`
 
 const MainContent = styled.div`
   background: white;
+  border: 1px solid #e8ecf0;
+  border-radius: 14px;
+  padding: 14px;
 `;
 
 const KanbanBoard = styled.div`
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 24px;
+  gap: 12px;
   padding: 0;
-  height: calc(100vh - 350px);
+  height: calc(100vh - 320px);
   overflow-x: auto;
   overflow-y: hidden;
   
@@ -148,38 +165,38 @@ const KanbanBoard = styled.div`
 
 const KanbanColumn = styled.div`
   background: #f8fafc;
-  border-radius: 12px;
-  padding: 20px;
+  border-radius: 10px;
+  padding: 12px;
   display: flex;
   flex-direction: column;
   min-height: 100%;
-  border: 1px solid #e8ecf0;
+  border: 1px solid #e2e8f0;
 `;
 
 const ColumnHeader = styled.div`
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
-  padding-bottom: 12px;
-  border-bottom: 2px solid ${props => props.color};
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid ${props => props.color}66;
 `;
 
 const ColumnTitle = styled.h3`
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 700;
   color: #0f172a;
   margin: 0;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.4px;
   display: flex;
   align-items: center;
   gap: 8px;
   
   &::before {
     content: '';
-    width: 8px;
-    height: 8px;
+    width: 6px;
+    height: 6px;
     border-radius: 50%;
     background: ${props => props.color};
   }
@@ -188,16 +205,16 @@ const ColumnTitle = styled.h3`
 const ColumnCount = styled.span`
   background: ${props => props.color}20;
   color: ${props => props.color};
-  padding: 4px 12px;
-  border-radius: 12px;
-  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
   font-weight: 600;
 `;
 
 const ColumnTasks = styled.div`
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   flex: 1;
   overflow-y: auto;
   
@@ -219,10 +236,82 @@ const ColumnTasks = styled.div`
   }
 `;
 
+const ListViewShell = styled.div`
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+  max-height: calc(100vh - 320px);
+  overflow-y: auto;
+`;
+
+const ListHeaderRow = styled.div`
+  display: grid;
+  grid-template-columns: minmax(280px, 2fr) 120px 140px 180px 180px;
+  gap: 10px;
+  padding: 10px 12px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 11px;
+  font-weight: 700;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+`;
+
+const ListRow = styled.div`
+  display: grid;
+  grid-template-columns: minmax(280px, 2fr) 120px 140px 180px 180px;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #f1f5f9;
+  align-items: center;
+
+  &:hover {
+    background: #f8fafc;
+  }
+`;
+
+const ListTaskTitle = styled.button`
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 0;
+  width: fit-content;
+`;
+
+const ListTaskSub = styled.div`
+  color: #64748b;
+  font-size: 11px;
+  margin-top: 2px;
+`;
+
+const StatusChip = styled.span`
+  width: fit-content;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.2px;
+  background: ${(props) =>
+    props.status === 'completed' ? '#dcfce7' :
+    props.status === 'in-progress' ? '#dbeafe' :
+    '#fef3c7'};
+  color: ${(props) =>
+    props.status === 'completed' ? '#166534' :
+    props.status === 'in-progress' ? '#1d4ed8' :
+    '#92400e'};
+`;
+
 const KanbanTask = styled.div`
   background: white;
-  padding: 14px;
-  border-radius: 12px;
+  padding: 8px 9px;
+  border-radius: 9px;
   border: 1px solid #e8ecf0;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
   cursor: pointer;
@@ -230,7 +319,7 @@ const KanbanTask = styled.div`
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 5px;
   
   &::before {
     content: '';
@@ -249,8 +338,8 @@ const KanbanTask = styled.div`
   }
   
   &:hover {
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-    transform: translateY(-2px);
+    box-shadow: 0 3px 9px rgba(15, 23, 42, 0.09);
+    transform: translateY(-1px);
     border-color: #cbd5e1;
   }
 `;
@@ -258,11 +347,11 @@ const KanbanTask = styled.div`
 const KanbanTaskHeader = styled.div`
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
 `;
 
 const KanbanTaskTitle = styled.div`
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 600;
   color: #0f172a;
   line-height: 1.5;
@@ -277,16 +366,16 @@ const KanbanTaskTitle = styled.div`
 const KanbanTaskMeta = styled.div`
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
 `;
 
 const KanbanTaskPriorityBadge = styled.span`
   display: inline-flex;
   align-items: center;
-  padding: 4px 8px;
-  border-radius: 6px;
-  font-size: 10px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  font-size: 9px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.3px;
@@ -308,21 +397,21 @@ const KanbanTaskAssignee = styled.div`
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
+  font-size: 10px;
   color: #64748b;
   flex-wrap: wrap;
   
   .avatar {
-    width: 20px;
-    height: 20px;
-    border-radius: 6px;
+    width: 18px;
+    height: 18px;
+    border-radius: 5px;
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     display: flex;
     align-items: center;
     justify-content: center;
     color: white;
     font-weight: 600;
-    font-size: 9px;
+    font-size: 8px;
     flex-shrink: 0;
     border: 1.5px solid white;
     box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.05);
@@ -341,17 +430,17 @@ const KanbanTaskAssignee = styled.div`
 `;
 
 const KanbanTaskDescription = styled.div`
-  font-size: 12px;
+  font-size: 11px;
   color: #64748b;
   line-height: 1.4;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  margin-top: 4px;
+  margin-top: 2px;
   
   * {
-    font-size: 12px !important;
+    font-size: 11px !important;
     color: #64748b !important;
   }
 `;
@@ -360,15 +449,15 @@ const KanbanTaskFooter = styled.div`
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-top: 4px;
-  padding-top: 10px;
+  margin-top: 2px;
+  padding-top: 7px;
   border-top: 1px solid #f1f5f9;
   gap: 8px;
 `;
 
 const KanbanTaskActions = styled.div`
   display: flex;
-  gap: 4px;
+  gap: 2px;
   flex-wrap: wrap;
   margin-left: auto;
 `;
@@ -376,7 +465,7 @@ const KanbanTaskActions = styled.div`
 const KanbanIconButton = styled.button`
   background: transparent;
   border: none;
-  padding: 6px;
+  padding: 5px;
   cursor: pointer;
   border-radius: 6px;
   transition: all 0.2s ease;
@@ -393,8 +482,8 @@ const KanbanIconButton = styled.button`
   flex-shrink: 0;
   
   svg {
-    width: 16px;
-    height: 16px;
+    width: 14px;
+    height: 14px;
   }
   
   &:hover {
@@ -428,11 +517,58 @@ const HeaderActions = styled.div`
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 24px;
+  margin-bottom: 14px;
+`;
+
+const HeaderLeft = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 12px;
+`;
+
+const ViewSwitch = styled.div`
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #f8fafc;
+`;
+
+const ViewSwitchButton = styled.button`
+  border: none;
+  background: ${(props) => (props.active ? '#ffffff' : 'transparent')};
+  color: ${(props) => (props.active ? '#1e40af' : '#64748b')};
+  font-weight: 600;
+  font-size: 12px;
+  border-radius: 8px;
+  padding: 8px 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  box-shadow: ${(props) => (props.active ? '0 1px 4px rgba(15,23,42,0.08)' : 'none')};
+`;
+
+const CalendarShell = styled.div`
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #fff;
+  padding: 12px;
+`;
+
+const CalendarToolbarHint = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 0 0 10px;
+  color: #64748b;
+  font-size: 12px;
 `;
 
 const PageTitle = styled.h2`
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 700;
   color: #0f172a;
   margin: 0;
@@ -442,16 +578,16 @@ const AddTaskButton = styled.button`
   background: linear-gradient(135deg, #3b82f6, #2563eb);
   color: white;
   border: none;
-  padding: 12px 24px;
-  border-radius: 10px;
-  font-size: 14px;
+  padding: 10px 16px;
+  border-radius: 9px;
+  font-size: 13px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
   display: flex;
   align-items: center;
   gap: 8px;
-  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.2);
+  box-shadow: 0 2px 6px rgba(59, 130, 246, 0.18);
 
   &:hover {
     transform: translateY(-1px);
@@ -460,7 +596,7 @@ const AddTaskButton = styled.button`
   
   &::before {
     content: '+';
-    font-size: 20px;
+    font-size: 16px;
     font-weight: 300;
   }
 `;
@@ -468,18 +604,18 @@ const AddTaskButton = styled.button`
 const Filters = styled.div`
   display: flex;
   gap: 8px;
-  margin-bottom: 24px;
+  margin-bottom: 14px;
   flex-wrap: wrap;
   align-items: center;
-  padding-bottom: 20px;
-  border-bottom: 2px solid #f1f5f9;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #e2e8f0;
 `;
 
 const FilterButton = styled.button`
-  padding: 10px 16px;
+  padding: 8px 12px;
   border: 2px solid ${props => props.active ? '#3b82f6' : '#e2e8f0'};
-  border-radius: 10px;
-  font-size: 13px;
+  border-radius: 8px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -784,6 +920,26 @@ const FormGroup = styled.div`
     
     &::placeholder {
       color: #94a3b8;
+    }
+  }
+
+  textarea {
+    padding: 14px 16px;
+    border: 2px solid #e2e8f0;
+    border-radius: 12px;
+    font-size: 14px;
+    transition: all 0.2s ease;
+    background: #fafbfc;
+    color: #0f172a;
+    font-family: inherit;
+    resize: vertical;
+    min-height: 96px;
+
+    &:focus {
+      outline: none;
+      border-color: #3b82f6;
+      background: white;
+      box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
     }
   }
 `;
@@ -1507,6 +1663,7 @@ const AssignModalButton = styled.button`
 
 const TaskManagement = () => {
   const { user } = useAuth();
+  const ownerId = user?._id || user?.id;
   const { tasks, setTasks, isLoading: tasksLoading } = useTasks();
   const [newTask, setNewTask] = useState('');
   const [newDescription, setNewDescription] = useState('');
@@ -1530,6 +1687,18 @@ const TaskManagement = () => {
   const [selectedAssignees, setSelectedAssignees] = useState([]);
   const [isAssigning, setIsAssigning] = useState(false);
   const [userSearchQuery, setUserSearchQuery] = useState('');
+  const [activeView, setActiveView] = useState('kanban');
+  const [meetings, setMeetings] = useState([]);
+  const [showMeetingModal, setShowMeetingModal] = useState(false);
+  const [editingMeetingId, setEditingMeetingId] = useState(null);
+  const [meetingForm, setMeetingForm] = useState({
+    title: '',
+    start: '',
+    end: '',
+    location: '',
+    notes: '',
+    allDay: false,
+  });
 
   // Permission checking helper
   const hasPermission = (permission) => {
@@ -1652,6 +1821,37 @@ const TaskManagement = () => {
   // No need to fetch on mount - context handles it
 
   useEffect(() => {
+    if (!ownerId) return undefined;
+    const db = getDb();
+    const meetingsQuery = query(collection(db, 'meetings'), where('ownerId', '==', ownerId));
+    const unsub = onSnapshot(
+      meetingsQuery,
+      (snap) => {
+        const list = [];
+        snap.forEach((d) => {
+          const data = d.data();
+          list.push({
+            id: d.id,
+            title: data.title || '',
+            start: data.start,
+            end: data.end,
+            allDay: !!data.allDay,
+            extendedProps: {
+              location: data.location || '',
+              notes: data.notes || '',
+            },
+          });
+        });
+        setMeetings(list);
+      },
+      () => {
+        toast.error('Failed to load meetings');
+      }
+    );
+    return () => unsub();
+  }, [ownerId]);
+
+  useEffect(() => {
     if (showAssignModal && canAssign) {
       fetchUsers();
     }
@@ -1738,13 +1938,23 @@ const TaskManagement = () => {
   };
 
   const updateTaskStatus = async (taskId, status) => {
+    let previousTasks = [];
+
+    // Optimistic update: move card immediately between columns
+    setTasks(prevTasks => {
+      previousTasks = prevTasks;
+      return prevTasks.map(t =>
+        t._id === taskId ? { ...t, status } : t
+      );
+    });
+
     try {
       const response = await tasksAPI.updateTask(taskId, { status });
       const updatedTask = response.data;
 
-      setTasks(prevTasks => prevTasks.map(t => 
-        t._id === taskId ? updatedTask : t
-      ));
+      setTasks(prevTasks =>
+        prevTasks.map(t => (t._id === taskId ? updatedTask : t))
+      );
 
       setSelectedTask(prev => (prev?._id === taskId ? updatedTask : prev));
       setEditingTask(prev => (prev?._id === taskId ? updatedTask : prev));
@@ -1757,6 +1967,8 @@ const TaskManagement = () => {
 
       toast.success(statusMessages[status] || 'Task status updated');
     } catch (error) {
+      // Revert optimistic update on failure
+      setTasks(previousTasks);
       toast.error(error.response?.data?.message || 'Failed to update task status');
     }
   };
@@ -2021,6 +2233,113 @@ const TaskManagement = () => {
     }
   };
 
+  const openMeetingModalForRange = (start, end, allDay = false) => {
+    setEditingMeetingId(null);
+    setMeetingForm({
+      title: '',
+      start,
+      end,
+      location: '',
+      notes: '',
+      allDay,
+    });
+    setShowMeetingModal(true);
+  };
+
+  const openMeetingModalForEvent = (event) => {
+    setEditingMeetingId(event.id);
+    setMeetingForm({
+      title: event.title || '',
+      start: event.start ? new Date(event.start).toISOString().slice(0, 16) : '',
+      end: event.end ? new Date(event.end).toISOString().slice(0, 16) : '',
+      location: event.extendedProps?.location || '',
+      notes: event.extendedProps?.notes || '',
+      allDay: !!event.allDay,
+    });
+    setShowMeetingModal(true);
+  };
+
+  const closeMeetingModal = () => {
+    setShowMeetingModal(false);
+    setEditingMeetingId(null);
+    setMeetingForm({
+      title: '',
+      start: '',
+      end: '',
+      location: '',
+      notes: '',
+      allDay: false,
+    });
+  };
+
+  const saveMeeting = async (e) => {
+    e.preventDefault();
+    if (!meetingForm.title.trim() || !meetingForm.start || !meetingForm.end) {
+      toast.error('Please provide title, start and end time');
+      return;
+    }
+
+    if (new Date(meetingForm.end) < new Date(meetingForm.start)) {
+      toast.error('Meeting end time must be after start time');
+      return;
+    }
+
+    const payload = {
+      title: meetingForm.title.trim(),
+      start: meetingForm.start,
+      end: meetingForm.end,
+      allDay: !!meetingForm.allDay,
+      location: meetingForm.location.trim(),
+      notes: meetingForm.notes.trim(),
+      ownerId,
+      updatedAt: serverTimestamp(),
+    };
+
+    try {
+      const db = getDb();
+      if (editingMeetingId) {
+        await updateDoc(doc(db, 'meetings', editingMeetingId), payload);
+        toast.success('Meeting updated');
+      } else {
+        await addDoc(collection(db, 'meetings'), {
+          ...payload,
+          createdAt: serverTimestamp(),
+        });
+        toast.success('Meeting created');
+      }
+      closeMeetingModal();
+    } catch {
+      toast.error('Failed to save meeting');
+    }
+  };
+
+  const deleteMeeting = async () => {
+    if (!editingMeetingId) return;
+    try {
+      const db = getDb();
+      await deleteDoc(doc(db, 'meetings', editingMeetingId));
+      toast.success('Meeting deleted');
+      closeMeetingModal();
+    } catch {
+      toast.error('Failed to delete meeting');
+    }
+  };
+
+  const handleCalendarDropResize = async (changeInfo) => {
+    const db = getDb();
+    try {
+      await updateDoc(doc(db, 'meetings', changeInfo.event.id), {
+        start: changeInfo.event.start?.toISOString(),
+        end: changeInfo.event.end?.toISOString(),
+        allDay: changeInfo.event.allDay,
+        updatedAt: serverTimestamp(),
+      });
+    } catch {
+      changeInfo.revert();
+      toast.error('Failed to update meeting time');
+    }
+  };
+
   const stats = getStats();
   const priorityColors = {
     urgent: { bg: '#fef2f2', border: '#fecaca', text: '#991b1b' },
@@ -2033,17 +2352,13 @@ const TaskManagement = () => {
     { status: 'in-progress', title: 'In Progress', color: '#3b82f6', emptyText: 'No in-progress tasks' },
     { status: 'completed', title: 'Completed', color: '#10b981', emptyText: 'No completed tasks' }
   ];
+  const visibleTasks = tasks.filter(task =>
+    !searchQuery || task.title.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   return (
     <Container>
       <ContentWrapper>
-        <Header>
-          <WelcomeSection>
-            <h1>Task Management</h1>
-            <p>Stay organized, get things done{user?.fullName ? `, ${user.fullName.split(' ')[0]}` : ''}</p>
-          </WelcomeSection>
-        </Header>
-
         <StatsGrid>
           <StatCard onClick={() => setFilter('all')}>
             <div className="label">Total Tasks</div>
@@ -2066,7 +2381,27 @@ const TaskManagement = () => {
 
         <MainContent>
           <HeaderActions>
-            <PageTitle>My Tasks</PageTitle>
+            <HeaderLeft>
+              <PageTitle>My Tasks</PageTitle>
+              <ViewSwitch>
+                <ViewSwitchButton
+                  type="button"
+                  active={activeView === 'kanban'}
+                  onClick={() => setActiveView('kanban')}
+                >
+                  <Columns3 size={14} />
+                  Board
+                </ViewSwitchButton>
+                <ViewSwitchButton
+                  type="button"
+                  active={activeView === 'list'}
+                  onClick={() => setActiveView('list')}
+                >
+                  <List size={14} />
+                  List
+                </ViewSwitchButton>
+              </ViewSwitch>
+            </HeaderLeft>
             {canCreate && (
               <AddTaskButton onClick={() => setShowAddModal(true)}>
                 Add New Task
@@ -2074,112 +2409,161 @@ const TaskManagement = () => {
             )}
           </HeaderActions>
 
-          <DragDropContext onDragEnd={handleDragEnd}>
-          <KanbanBoard>
-              {columnConfigs.map((column) => {
-                const columnTasks = tasks.filter(task =>
-                  task.status === column.status &&
-                  (!searchQuery || task.title.toLowerCase().includes(searchQuery.toLowerCase()))
-                );
-                const totalInColumn = tasks.filter(task => task.status === column.status).length;
-                return (
-                  <KanbanColumn key={column.status}>
-                    <ColumnHeader color={column.color}>
-                      <ColumnTitle color={column.color}>{column.title}</ColumnTitle>
-                      <ColumnCount color={column.color}>{totalInColumn}</ColumnCount>
-              </ColumnHeader>
-                    <Droppable droppableId={column.status}>
-                      {(provided, snapshot) => (
-                        <ColumnTasks
-                          ref={provided.innerRef}
-                          {...provided.droppableProps}
-                          style={snapshot.isDraggingOver ? { background: '#eef2ff50' } : undefined}
-                        >
-                          {columnTasks.map((task, index) => {
-                            const isCompletedColumn = column.status === 'completed';
-                            const descriptionHtml = task.description
-                              ? (isCompletedColumn ? task.description : stripImagesFromHTML(task.description))
-                              : null;
-                            return (
-                              <Draggable key={task._id} draggableId={task._id} index={index}>
-                                {(dragProvided, dragSnapshot) => (
-                  <KanbanTask 
-                                    ref={dragProvided.innerRef}
-                                    {...dragProvided.draggableProps}
-                                    {...dragProvided.dragHandleProps}
-                    priority={task.priority}
-                    onClick={() => handleTaskClick(task)}
-                                    style={dragProvided.draggableProps.style}
-                                    data-dragging={dragSnapshot.isDragging}
-                  >
-                    <KanbanTaskHeader>
-                      <KanbanTaskTitle completed={isCompletedColumn}>{task.title}</KanbanTaskTitle>
-                      <KanbanTaskMeta>
-                        <KanbanTaskPriorityBadge priority={task.priority}>
-                          {task.priority}
-                        </KanbanTaskPriorityBadge>
-                        {(task.assignees && task.assignees.length > 0) || task.user ? (
-                          <KanbanTaskAssignee>
-                            {(() => {
-                              // Get assignees - prefer assignees array, fallback to user
-                              const assignees = task.assignees && task.assignees.length > 0 
-                                ? task.assignees 
-                                : (task.user ? [task.user] : []);
-                              
-                              // Show first 2 assignees, then count for rest
-                              const visibleAssignees = assignees.slice(0, 2);
-                              const remainingCount = assignees.length - 2;
-                              
+          {activeView === 'kanban' ? (
+            <DragDropContext onDragEnd={handleDragEnd}>
+              <KanbanBoard>
+                {columnConfigs.map((column) => {
+                  const columnTasks = tasks.filter(task =>
+                    task.status === column.status &&
+                    (!searchQuery || task.title.toLowerCase().includes(searchQuery.toLowerCase()))
+                  );
+                  const totalInColumn = tasks.filter(task => task.status === column.status).length;
+                  return (
+                    <KanbanColumn key={column.status}>
+                      <ColumnHeader color={column.color}>
+                        <ColumnTitle color={column.color}>{column.title}</ColumnTitle>
+                        <ColumnCount color={column.color}>{totalInColumn}</ColumnCount>
+                      </ColumnHeader>
+                      <Droppable droppableId={column.status}>
+                        {(provided, snapshot) => (
+                          <ColumnTasks
+                            ref={provided.innerRef}
+                            {...provided.droppableProps}
+                            style={snapshot.isDraggingOver ? { background: '#eef2ff50' } : undefined}
+                          >
+                            {columnTasks.map((task, index) => {
+                              const isCompletedColumn = column.status === 'completed';
+                              const descriptionHtml = task.description
+                                ? (isCompletedColumn ? task.description : stripImagesFromHTML(task.description))
+                                : null;
                               return (
-                                <>
-                                  {visibleAssignees.map((assignee, idx) => (
-                                    <div key={idx} className="assignee-item" title={getUserDisplayName(assignee)}>
-                                      <div className="avatar">
-                                        {getUserInitials(assignee)}
-                                      </div>
-                                      {idx === 0 && assignees.length === 1 && (
-                                        <span>{getUserDisplayName(assignee)}</span>
+                                <Draggable key={task._id} draggableId={task._id} index={index}>
+                                  {(dragProvided, dragSnapshot) => (
+                                    <KanbanTask
+                                      ref={dragProvided.innerRef}
+                                      {...dragProvided.draggableProps}
+                                      {...dragProvided.dragHandleProps}
+                                      priority={task.priority}
+                                      onClick={() => handleTaskClick(task)}
+                                      style={dragProvided.draggableProps.style}
+                                      data-dragging={dragSnapshot.isDragging}
+                                    >
+                                      <KanbanTaskHeader>
+                                        <KanbanTaskTitle completed={isCompletedColumn}>{task.title}</KanbanTaskTitle>
+                                        <KanbanTaskMeta>
+                                          <KanbanTaskPriorityBadge priority={task.priority}>
+                                            {task.priority}
+                                          </KanbanTaskPriorityBadge>
+                                          {(task.assignees && task.assignees.length > 0) || task.user ? (
+                                            <KanbanTaskAssignee>
+                                              {(() => {
+                                                const assignees = task.assignees && task.assignees.length > 0
+                                                  ? task.assignees
+                                                  : (task.user ? [task.user] : []);
+                                                const visibleAssignees = assignees.slice(0, 2);
+                                                const remainingCount = assignees.length - 2;
+                                                return (
+                                                  <>
+                                                    {visibleAssignees.map((assignee, idx) => (
+                                                      <div key={idx} className="assignee-item" title={getUserDisplayName(assignee)}>
+                                                        <div className="avatar">
+                                                          {getUserInitials(assignee)}
+                                                        </div>
+                                                        {idx === 0 && assignees.length === 1 && (
+                                                          <span>{getUserDisplayName(assignee)}</span>
+                                                        )}
+                                                      </div>
+                                                    ))}
+                                                    {remainingCount > 0 && (
+                                                      <span className="more-count">+{remainingCount}</span>
+                                                    )}
+                                                  </>
+                                                );
+                                              })()}
+                                            </KanbanTaskAssignee>
+                                          ) : null}
+                                        </KanbanTaskMeta>
+                                      </KanbanTaskHeader>
+                                      {descriptionHtml && (
+                                        <KanbanTaskDescription
+                                          dangerouslySetInnerHTML={{ __html: descriptionHtml }}
+                                          style={isCompletedColumn ? { opacity: 0.7 } : {}}
+                                        />
                                       )}
-                                    </div>
-                                  ))}
-                                  {remainingCount > 0 && (
-                                    <span className="more-count">+{remainingCount}</span>
+                                      <KanbanTaskFooter>
+                                        {renderTaskActions(column.status, task)}
+                                      </KanbanTaskFooter>
+                                    </KanbanTask>
                                   )}
-                                </>
+                                </Draggable>
                               );
-                            })()}
-                          </KanbanTaskAssignee>
-                        ) : null}
-                      </KanbanTaskMeta>
-                    </KanbanTaskHeader>
-                    {descriptionHtml && (
-                      <KanbanTaskDescription
-                        dangerouslySetInnerHTML={{ __html: descriptionHtml }}
-                        style={isCompletedColumn ? { opacity: 0.7 } : {}}
-                      />
-                    )}
-                    <KanbanTaskFooter>
-                      {renderTaskActions(column.status, task)}
-                    </KanbanTaskFooter>
-                  </KanbanTask>
-                                )}
-                              </Draggable>
-                            );
-                          })}
-                          {totalInColumn === 0 && (
-                  <EmptyState>
-                              <p style={{ fontSize: '13px' }}>{column.emptyText}</p>
-                  </EmptyState>
-                )}
-                          {provided.placeholder}
-              </ColumnTasks>
-                      )}
-                    </Droppable>
-            </KanbanColumn>
+                            })}
+                            {totalInColumn === 0 && (
+                              <EmptyState>
+                                <p style={{ fontSize: '13px' }}>{column.emptyText}</p>
+                              </EmptyState>
+                            )}
+                            {provided.placeholder}
+                          </ColumnTasks>
+                        )}
+                      </Droppable>
+                    </KanbanColumn>
+                  );
+                })}
+              </KanbanBoard>
+            </DragDropContext>
+          ) : (
+            <ListViewShell>
+              <ListHeaderRow>
+                <div>Task</div>
+                <div>Status</div>
+                <div>Priority</div>
+                <div>Assignees</div>
+                <div>Actions</div>
+              </ListHeaderRow>
+              {visibleTasks.map((task) => {
+                const assignees = task.assignees && task.assignees.length > 0
+                  ? task.assignees
+                  : (task.user ? [task.user] : []);
+                const plainDescription = task.description
+                  ? stripImagesFromHTML(task.description).replace(/<[^>]*>/g, '').trim()
+                  : '';
+                return (
+                  <ListRow key={task._id}>
+                    <div>
+                      <ListTaskTitle type="button" onClick={() => handleTaskClick(task)}>
+                        {task.title}
+                      </ListTaskTitle>
+                      {plainDescription ? (
+                        <ListTaskSub>
+                          {plainDescription.length > 120
+                            ? `${plainDescription.slice(0, 120)}...`
+                            : plainDescription}
+                        </ListTaskSub>
+                      ) : null}
+                    </div>
+                    <div>
+                      <StatusChip status={task.status}>{task.status.replace('-', ' ')}</StatusChip>
+                    </div>
+                    <div>
+                      <KanbanTaskPriorityBadge priority={task.priority}>{task.priority}</KanbanTaskPriorityBadge>
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#475569' }}>
+                      {assignees.length > 0
+                        ? assignees.slice(0, 2).map((a) => getUserDisplayName(a)).join(', ')
+                        : 'Unassigned'}
+                    </div>
+                    <div>{renderTaskActions(task.status, task)}</div>
+                  </ListRow>
                 );
               })}
-          </KanbanBoard>
-          </DragDropContext>
+              {visibleTasks.length === 0 && (
+                <EmptyState style={{ margin: 16 }}>
+                  <p style={{ fontSize: '13px' }}>No tasks match your current filters.</p>
+                </EmptyState>
+              )}
+            </ListViewShell>
+          )}
         </MainContent>
       </ContentWrapper>
 

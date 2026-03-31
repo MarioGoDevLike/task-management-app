@@ -1,4 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { onAuthStateChanged } from 'firebase/auth';
+import { getFirebaseAuth } from '../firebase/app';
 import { authAPI } from '../services/api';
 import { toast } from 'react-hot-toast';
 
@@ -18,32 +20,67 @@ export const AuthProvider = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   useEffect(() => {
-    checkAuthStatus();
+    let cancelled = false;
+    const auth = getFirebaseAuth();
+    const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (!firebaseUser) {
+        if (!cancelled) {
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+          setUser(null);
+          setIsAuthenticated(false);
+          setIsLoading(false);
+        }
+        return;
+      }
+      try {
+        const token = await firebaseUser.getIdToken();
+        localStorage.setItem('token', token);
+        const response = await authAPI.getCurrentUser();
+        const currentUser = response.data.user;
+        if (!cancelled) {
+          setUser(currentUser);
+          setIsAuthenticated(true);
+          localStorage.setItem('user', JSON.stringify(currentUser));
+        }
+      } catch {
+        if (!cancelled) {
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+          setUser(null);
+          setIsAuthenticated(false);
+        }
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+      unsub();
+    };
   }, []);
 
   const checkAuthStatus = async () => {
+    const auth = getFirebaseAuth();
+    const firebaseUser = auth.currentUser;
+    if (!firebaseUser) {
+      setUser(null);
+      setIsAuthenticated(false);
+      return;
+    }
     try {
-      const token = localStorage.getItem('token');
-      const storedUser = localStorage.getItem('user');
-
-      if (!token || !storedUser) {
-        setUser(null);
-        setIsAuthenticated(false);
-        return;
-      }
-
+      const token = await firebaseUser.getIdToken();
+      localStorage.setItem('token', token);
       const response = await authAPI.getCurrentUser();
       const currentUser = response.data.user;
       setUser(currentUser);
       setIsAuthenticated(true);
       localStorage.setItem('user', JSON.stringify(currentUser));
-    } catch (error) {
+    } catch {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
       setUser(null);
       setIsAuthenticated(false);
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -52,7 +89,6 @@ export const AuthProvider = ({ children }) => {
       setUser(userData);
       setIsAuthenticated(true);
       localStorage.setItem('user', JSON.stringify(userData));
-      toast.success(`Welcome back, ${userData.firstName}!`);
     } catch (error) {
       console.error('Login error:', error);
       throw error;
@@ -64,7 +100,6 @@ export const AuthProvider = ({ children }) => {
       setUser(userData);
       setIsAuthenticated(true);
       localStorage.setItem('user', JSON.stringify(userData));
-      toast.success(`Welcome, ${userData.firstName}!`);
     } catch (error) {
       console.error('Registration error:', error);
       throw error;

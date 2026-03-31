@@ -51,13 +51,11 @@ const PageHeader = styled.header`
 
 const SettingsLayout = styled.div`
   display: flex;
-  min-height: calc(100vh - 180px);
+  flex-direction: column;
+  gap: 20px;
   max-width: 1400px;
   margin: 0 auto;
-
-  @media (max-width: 1024px) {
-    flex-direction: column;
-  }
+  padding: 20px 20px 0;
 `;
 
 const SummaryGrid = styled.div`
@@ -67,24 +65,19 @@ const SummaryGrid = styled.div`
   margin-bottom: 36px;
 `;
 
-const Sidebar = styled.aside`
-  width: 280px;
+const Sidebar = styled.section`
+  width: 100%;
   background: white;
-  border-right: 1px solid #e2e8f0;
-  padding: 24px 0;
-  flex-shrink: 0;
-
-  @media (max-width: 1024px) {
-    width: 100%;
-    border-right: none;
-    border-bottom: 1px solid #e2e8f0;
-  }
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 16px;
+  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.04);
 `;
 
 const SidebarSearch = styled.div`
-  padding: 0 20px 20px 20px;
+  padding: 0 0 14px;
   border-bottom: 1px solid #f1f5f9;
-  margin-bottom: 16px;
+  margin-bottom: 14px;
 `;
 
 const SidebarSearchInput = styled.input`
@@ -111,44 +104,38 @@ const SidebarSearchInput = styled.input`
 
 const SidebarTabsList = styled.div`
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 0 12px;
+  flex-wrap: wrap;
+  gap: 10px;
 `;
 
 const SidebarTabButton = styled.button`
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
+  gap: 10px;
+  padding: 10px 14px;
   border-radius: 12px;
-  border: none;
-  background: ${({ active }) => (active ? '#eff6ff' : 'transparent')};
+  border: 1px solid ${({ active }) => (active ? '#bfdbfe' : '#e2e8f0')};
+  background: ${({ active }) =>
+    active ? 'linear-gradient(135deg, #eff6ff 0%, #e8f2ff 100%)' : '#ffffff'};
   color: ${({ active }) => (active ? '#2563eb' : '#475569')};
-  font-size: 14px;
+  font-size: 13px;
   font-weight: ${({ active }) => (active ? '600' : '500')};
   cursor: pointer;
   transition: all 0.15s ease;
   text-align: left;
-  width: 100%;
+  width: auto;
   position: relative;
+  min-height: 42px;
 
   &:hover {
-    background: ${({ active }) => (active ? '#eff6ff' : '#f8fafc')};
+    background: ${({ active }) =>
+      active ? 'linear-gradient(135deg, #eff6ff 0%, #e8f2ff 100%)' : '#f8fafc'};
     color: ${({ active }) => (active ? '#2563eb' : '#1e40af')};
+    border-color: ${({ active }) => (active ? '#93c5fd' : '#cbd5e1')};
   }
 
   &::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 3px;
-    height: ${({ active }) => (active ? '24px' : '0')};
-    background: #2563eb;
-    border-radius: 0 3px 3px 0;
-    transition: height 0.2s ease;
+    content: none;
   }
 
   svg {
@@ -158,13 +145,9 @@ const SidebarTabButton = styled.button`
 
 const ContentArea = styled.main`
   flex: 1;
-  padding: 32px;
+  padding: 8px 0 32px;
   overflow-y: auto;
-  background: #f8fafc;
-
-  @media (max-width: 1024px) {
-    padding: 24px 16px;
-  }
+  background: transparent;
 `;
 
 const SearchResults = styled.div`

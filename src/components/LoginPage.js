@@ -82,7 +82,9 @@ const Input = styled.input`
     color: #94a3b8;
   }
 
-  ${props => props.error && `
+  ${(props) =>
+    props.error &&
+    `
     border-color: #ef4444;
     background: #fef2f2;
     
@@ -121,6 +123,7 @@ const Button = styled.button`
   }
 `;
 
+
 const LoadingSpinner = styled.div`
   display: inline-block;
   width: 18px;
@@ -131,7 +134,9 @@ const LoadingSpinner = styled.div`
   animation: spin 0.8s linear infinite;
 
   @keyframes spin {
-    to { transform: rotate(360deg); }
+    to {
+      transform: rotate(360deg);
+    }
   }
 `;
 
@@ -144,10 +149,10 @@ const LoginPage = ({ onLogin }) => {
     try {
       const response = await authAPI.login(data);
       const { token, user } = response.data;
-      
+
       localStorage.setItem('token', token);
       localStorage.setItem('user', JSON.stringify(user));
-      
+
       toast.success('Welcome back!');
       onLogin(user);
     } catch (error) {
@@ -162,7 +167,7 @@ const LoginPage = ({ onLogin }) => {
     <Container>
       <Card>
         <Logo>
-          <h1>Task Manager</h1>
+          <h1>WorkPilot</h1>
           <p>Sign in to continue</p>
         </Logo>
 
@@ -177,8 +182,8 @@ const LoginPage = ({ onLogin }) => {
                 required: 'Email is required',
                 pattern: {
                   value: /^\S+@\S+$/i,
-                  message: 'Invalid email address'
-                }
+                  message: 'Invalid email address',
+                },
               })}
               error={errors.email}
             />
@@ -192,7 +197,7 @@ const LoginPage = ({ onLogin }) => {
               type="password"
               placeholder="Enter your password"
               {...register('password', {
-                required: 'Password is required'
+                required: 'Password is required',
               })}
               error={errors.password}
             />
@@ -203,6 +208,7 @@ const LoginPage = ({ onLogin }) => {
             {isLoading ? <LoadingSpinner /> : 'Sign In'}
           </Button>
         </Form>
+
       </Card>
     </Container>
   );

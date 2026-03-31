@@ -138,15 +138,15 @@ function createMenu() {
       label: 'Help',
       submenu: [
         {
-          label: 'About Task Management',
+          label: 'About WorkPilot',
           click: () => {
             // Show about dialog
             const { dialog } = require('electron');
             dialog.showMessageBox(mainWindow, {
               type: 'info',
-              title: 'About Task Management',
-              message: 'Task Management Desktop App',
-              detail: 'A beautiful and productive task management application built with Electron and React.'
+              title: 'About WorkPilot',
+              message: 'WorkPilot Desktop App',
+              detail: 'A beautiful and productive work management application built with Electron and React.'
             });
           }
         }

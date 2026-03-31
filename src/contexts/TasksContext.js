@@ -1,9 +1,16 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { io } from 'socket.io-client';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import {
+  collection,
+  query,
+  where,
+  onSnapshot,
+  doc,
+  getDoc,
+} from 'firebase/firestore';
+import { getDb } from '../firebase/app';
 import { tasksAPI } from '../services/api';
 import { useAuth } from './AuthContext';
 import { toast } from 'react-hot-toast';
-import { getSocketOrigin } from '../config/api';
 
 const TasksContext = createContext();
 
@@ -15,110 +22,142 @@ export const useTasks = () => {
   return context;
 };
 
+function mapDocToTask(id, data, userById) {
+  const hydrateUser = (uid) => {
+    if (!uid) return null;
+    const u = userById[uid];
+    return u || { _id: uid, id: uid };
+  };
+  const assigneeIds = data.assigneeIds || [];
+  const assignees = assigneeIds.map((x) => hydrateUser(x));
+  const ownerId = data.userId;
+  return {
+    _id: id,
+    id,
+    title: data.title,
+    description: data.description || '',
+    status: data.status || 'pending',
+    priority: data.priority || 'medium',
+    dueDate: data.dueDate,
+    isArchived: !!data.isArchived,
+    user: hydrateUser(ownerId),
+    assignees: assignees.length ? assignees : ownerId ? [hydrateUser(ownerId)] : [],
+  };
+}
+
+async function buildUserLookup(docs) {
+  const ids = new Set();
+  docs.forEach(({ data }) => {
+    (data.assigneeIds || []).forEach((x) => ids.add(x));
+    if (data.userId) ids.add(data.userId);
+  });
+  const db = getDb();
+  /** @type {Record<string, object>} */
+  const userById = {};
+  await Promise.all(
+    [...ids].map(async (uid) => {
+      const snap = await getDoc(doc(db, 'users', uid));
+      if (!snap.exists()) {
+        userById[uid] = { _id: uid, id: uid, email: '', firstName: '', lastName: '' };
+        return;
+      }
+      const d = snap.data();
+      userById[uid] = {
+        _id: uid,
+        id: uid,
+        email: d.email || '',
+        firstName: d.firstName || '',
+        lastName: d.lastName || '',
+        fullName: `${d.firstName || ''} ${d.lastName || ''}`.trim() || d.email || '',
+      };
+    })
+  );
+  return userById;
+}
+
 export const TasksProvider = ({ children }) => {
   const { user, isAuthenticated } = useAuth();
   const [tasks, setTasks] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [socket, setSocket] = useState(null);
-  const [hasFetched, setHasFetched] = useState(false);
+  const q1Ref = useRef(new Map());
+  const q2Ref = useRef(new Map());
+  const hydrateSeq = useRef(0);
+  const uid = user?._id || user?.id;
 
-  // Initialize socket connection
+  const applyMergedTasks = useCallback(async () => {
+    const m = new Map();
+    q1Ref.current.forEach((v, k) => m.set(k, v));
+    q2Ref.current.forEach((v, k) => m.set(k, v));
+    const docs = [...m.values()];
+    const seq = ++hydrateSeq.current;
+    const userById = await buildUserLookup(docs);
+    if (seq !== hydrateSeq.current) return;
+    setTasks(docs.map((row) => mapDocToTask(row.id, row.data, userById)));
+  }, []);
+
   useEffect(() => {
-    if (!isAuthenticated || !user) {
-      if (socket) {
-        socket.disconnect();
-        setSocket(null);
-      }
-      return;
+    if (!isAuthenticated || !uid) {
+      setTasks([]);
+      setIsLoading(false);
+      q1Ref.current = new Map();
+      q2Ref.current = new Map();
+      return undefined;
     }
 
-    const token = localStorage.getItem('token');
-    const socketUrl = getSocketOrigin();
+    setIsLoading(true);
+    q1Ref.current = new Map();
+    q2Ref.current = new Map();
 
-    const newSocket = io(socketUrl, {
-      auth: { token },
-      transports: ['websocket', 'polling']
-    });
+    const db = getDb();
+    const col = collection(db, 'tasks');
+    const q1 = query(
+      col,
+      where('assigneeIds', 'array-contains', uid),
+      where('isArchived', '==', false)
+    );
+    const q2 = query(col, where('userId', '==', uid), where('isArchived', '==', false));
 
-    newSocket.on('connect', () => {
-      console.log('✅ Socket connected');
-    });
+    const unsub1 = onSnapshot(
+      q1,
+      (snap) => {
+        const map = new Map();
+        snap.docs.forEach((d) => map.set(d.id, { id: d.id, data: d.data() }));
+        q1Ref.current = map;
+        applyMergedTasks().finally(() => setIsLoading(false));
+      },
+      (err) => {
+        console.error('Tasks subscription error:', err);
+        toast.error('Failed to sync tasks');
+        setIsLoading(false);
+      }
+    );
 
-    newSocket.on('disconnect', () => {
-      console.log('❌ Socket disconnected');
-    });
-
-    newSocket.on('connect_error', (error) => {
-      console.error('Socket connection error:', error);
-    });
-
-    // Listen for task events
-    newSocket.on('task:created', (task) => {
-      console.log('📥 Task created:', task._id);
-      setTasks(prevTasks => {
-        // Check if task already exists (avoid duplicates)
-        if (prevTasks.some(t => t._id === task._id)) {
-          return prevTasks.map(t => t._id === task._id ? task : t);
-        }
-        return [...prevTasks, task];
-      });
-    });
-
-    newSocket.on('task:updated', (task) => {
-      console.log('📥 Task updated:', task._id);
-      setTasks(prevTasks => 
-        prevTasks.map(t => t._id === task._id ? task : t)
-      );
-    });
-
-    newSocket.on('task:deleted', ({ taskId }) => {
-      console.log('📥 Task deleted:', taskId);
-      setTasks(prevTasks => prevTasks.filter(t => t._id !== taskId));
-    });
-
-    setSocket(newSocket);
+    const unsub2 = onSnapshot(
+      q2,
+      (snap) => {
+        const map = new Map();
+        snap.docs.forEach((d) => map.set(d.id, { id: d.id, data: d.data() }));
+        q2Ref.current = map;
+        applyMergedTasks().finally(() => setIsLoading(false));
+      },
+      (err) => {
+        console.error('Tasks subscription error:', err);
+        toast.error('Failed to sync tasks');
+        setIsLoading(false);
+      }
+    );
 
     return () => {
-      newSocket.disconnect();
+      unsub1();
+      unsub2();
     };
-  }, [isAuthenticated, user]);
+  }, [isAuthenticated, uid, applyMergedTasks]);
 
-  // Fetch tasks only once on mount or when user changes
-  const fetchTasks = useCallback(async () => {
-    if (!isAuthenticated || hasFetched) return;
-    
-    try {
-      setIsLoading(true);
-      const response = await tasksAPI.getTasks();
-      setTasks(response.data.tasks || []);
-      setHasFetched(true);
-    } catch (error) {
-      console.error('Failed to fetch tasks:', error);
-      toast.error('Failed to load tasks');
-    } finally {
-      setIsLoading(false);
-    }
-  }, [isAuthenticated, hasFetched]);
-
-  useEffect(() => {
-    if (isAuthenticated && !hasFetched) {
-      fetchTasks();
-    }
-  }, [isAuthenticated, hasFetched, fetchTasks]);
-
-  // Reset when user logs out
-  useEffect(() => {
-    if (!isAuthenticated) {
-      setTasks([]);
-      setHasFetched(false);
-    }
-  }, [isAuthenticated]);
-
-  // Manual refresh function (for when needed)
   const refreshTasks = useCallback(async () => {
+    if (!isAuthenticated) return;
     try {
       setIsLoading(true);
-      const response = await tasksAPI.getTasks();
+      const response = await tasksAPI.getTasks({ limit: 500 });
       setTasks(response.data.tasks || []);
     } catch (error) {
       console.error('Failed to refresh tasks:', error);
@@ -126,14 +165,20 @@ export const TasksProvider = ({ children }) => {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setTasks([]);
+    }
+  }, [isAuthenticated]);
 
   const value = {
     tasks,
     setTasks,
     isLoading,
     refreshTasks,
-    socket
+    socket: null,
   };
 
   return (
@@ -142,4 +187,3 @@ export const TasksProvider = ({ children }) => {
     </TasksContext.Provider>
   );
 };
-
