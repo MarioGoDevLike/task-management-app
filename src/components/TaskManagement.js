@@ -34,7 +34,6 @@ import {
   Columns3,
   List,
   FolderKanban,
-  FolderPlus,
   ChevronDown,
   Check,
   Plus,
@@ -715,6 +714,109 @@ const ProjectActions = styled.div`
   }
 `;
 
+const ProjectManagerHeader = styled.div`
+  margin-bottom: 14px;
+
+  h3 {
+    margin: 0;
+    font-size: 18px;
+    color: #0f172a;
+  }
+
+  p {
+    margin: 6px 0 0;
+    font-size: 12px;
+    color: #64748b;
+  }
+`;
+
+const ProjectManagerForm = styled.form`
+  display: grid;
+  grid-template-columns: 1.2fr 1.8fr auto;
+  gap: 8px;
+  margin-bottom: 14px;
+
+  @media (max-width: 768px) {
+    grid-template-columns: 1fr;
+  }
+`;
+
+const ProjectManagerInput = styled.input`
+  border: 1px solid #cbd5e1;
+  border-radius: 9px;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: #0f172a;
+  background: #fff;
+
+  &:focus {
+    outline: none;
+    border-color: #60a5fa;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.14);
+  }
+`;
+
+const ProjectManagerSubmit = styled.button`
+  border: 1px solid #93c5fd;
+  background: linear-gradient(135deg, #ffffff 0%, #eff6ff 100%);
+  color: #1e3a8a;
+  border-radius: 9px;
+  padding: 10px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+`;
+
+const ProjectManagerList = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 360px;
+  overflow-y: auto;
+`;
+
+const ProjectManagerItem = styled.div`
+  border: 1px solid ${(p) => (p.$active ? '#93c5fd' : '#e2e8f0')};
+  background: ${(p) => (p.$active ? '#eff6ff' : '#fff')};
+  border-radius: 10px;
+  padding: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+
+  .title {
+    font-size: 13px;
+    font-weight: 700;
+    color: #0f172a;
+  }
+
+  .desc {
+    font-size: 11px;
+    color: #64748b;
+    margin-top: 2px;
+  }
+`;
+
+const ProjectManagerActions = styled.div`
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+`;
+
+const ProjectManagerAction = styled.button`
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  color: ${(p) => (p.$danger ? '#dc2626' : '#475569')};
+  border-radius: 8px;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+`;
+
 const ProjectSelectorWrap = styled.div`
   display: inline-flex;
   align-items: center;
@@ -823,34 +925,6 @@ const ProjectDropdownItem = styled.button`
   }
 `;
 
-const CreateProjectButton = styled.button`
-  border: 1px solid #93c5fd;
-  background: linear-gradient(135deg, #ffffff 0%, #eff6ff 100%);
-  color: #1e3a8a;
-  border-radius: 8px;
-  padding: 9px 12px;
-  font-size: 12px;
-  font-weight: 700;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.12);
-
-  &:hover {
-    border-color: #60a5fa;
-    color: #1d4ed8;
-    background: linear-gradient(135deg, #ffffff 0%, #dbeafe 100%);
-    transform: translateY(-1px);
-    box-shadow: 0 4px 10px rgba(37, 99, 235, 0.2);
-  }
-
-  @media (max-width: 768px) {
-    width: 100%;
-    justify-content: center;
-  }
-`;
-
 const HeaderLeft = styled.div`
   display: flex;
   align-items: center;
@@ -863,38 +937,66 @@ const HeaderLeft = styled.div`
   }
 `;
 
-const ViewSwitch = styled.div`
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  background: #f8fafc;
-
-  @media (max-width: 768px) {
-    width: 100%;
-    justify-content: space-between;
-  }
-`;
-
-const ViewSwitchButton = styled.button`
-  border: none;
-  background: ${(props) => (props.active ? '#ffffff' : 'transparent')};
-  color: ${(props) => (props.active ? '#1e40af' : '#64748b')};
-  font-weight: 600;
-  font-size: 12px;
+const ProjectsTabButton = styled.button`
+  border: 1px solid ${(p) => (p.$active ? '#93c5fd' : '#bfdbfe')};
+  background: ${(p) =>
+    p.$active
+      ? 'linear-gradient(135deg, #ffffff 0%, #dbeafe 100%)'
+      : 'linear-gradient(135deg, #ffffff 0%, #eff6ff 100%)'};
+  color: ${(p) => (p.$active ? '#1d4ed8' : '#1e3a8a')};
   border-radius: 8px;
-  padding: 8px 12px;
+  padding: 9px 12px;
+  font-size: 12px;
+  font-weight: 700;
   display: inline-flex;
   align-items: center;
   gap: 6px;
   cursor: pointer;
-  box-shadow: ${(props) => (props.active ? '0 1px 4px rgba(15,23,42,0.08)' : 'none')};
+  box-shadow: ${(p) =>
+    p.$active ? '0 4px 10px rgba(37, 99, 235, 0.2)' : '0 2px 6px rgba(37, 99, 235, 0.12)'};
+  transition: all 0.2s ease;
+
+  &:hover {
+    border-color: #60a5fa;
+    color: #1d4ed8;
+    background: linear-gradient(135deg, #ffffff 0%, #dbeafe 100%);
+    transform: translateY(-1px);
+  }
 
   @media (max-width: 768px) {
-    flex: 1;
+    width: 100%;
     justify-content: center;
+  }
+`;
+
+const ViewModeToggle = styled.div`
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid #bfdbfe;
+  border-radius: 11px;
+  background: linear-gradient(135deg, #ffffff 0%, #eff6ff 100%);
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.14);
+`;
+
+const ViewModeButton = styled.button`
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 8px;
+  background: ${(p) => (p.$active ? '#ffffff' : 'transparent')};
+  color: ${(p) => (p.$active ? '#1d4ed8' : '#64748b')};
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  box-shadow: ${(p) => (p.$active ? '0 2px 8px rgba(15, 23, 42, 0.12)' : 'none')};
+
+  &:hover {
+    color: #1d4ed8;
+    background: ${(p) => (p.$active ? '#ffffff' : '#eff6ff')};
   }
 `;
 
@@ -2223,9 +2325,11 @@ const TaskManagement = () => {
   const [projects, setProjects] = useState([]);
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const [isProjectDropdownOpen, setIsProjectDropdownOpen] = useState(false);
-  const [showProjectModal, setShowProjectModal] = useState(false);
+  const [showProjectsModal, setShowProjectsModal] = useState(false);
   const [projectForm, setProjectForm] = useState({ name: '', description: '' });
-  const [isCreatingProject, setIsCreatingProject] = useState(false);
+  const [isSavingProject, setIsSavingProject] = useState(false);
+  const [editingProjectId, setEditingProjectId] = useState(null);
+  const [isDeletingProjectId, setIsDeletingProjectId] = useState('');
   const [meetingForm, setMeetingForm] = useState({
     title: '',
     start: '',
@@ -2257,6 +2361,7 @@ const TaskManagement = () => {
   const canUpdate = hasPermission('tasks.update');
   const canDelete = hasPermission('tasks.delete');
   const canAssign = hasPermission('tasks.assign');
+  const canManageProjects = hasPermission('projects.manage');
 
   const editQuillRef = useRef(null);
   const projectDropdownRef = useRef(null);
@@ -2403,6 +2508,12 @@ const TaskManagement = () => {
   }, [selectedProjectId]);
 
   useEffect(() => {
+    if (activeView !== 'kanban' && activeView !== 'list') {
+      setActiveView('kanban');
+    }
+  }, [activeView]);
+
+  useEffect(() => {
     const onPointerDown = (event) => {
       if (!projectDropdownRef.current) return;
       if (!projectDropdownRef.current.contains(event.target)) {
@@ -2430,28 +2541,77 @@ const TaskManagement = () => {
     }
   };
 
-  const createProject = async (e) => {
+  const saveProject = async (e) => {
     e.preventDefault();
-    if (isCreatingProject) return;
+    if (isSavingProject) return;
     const name = projectForm.name.trim();
     if (!name) return;
     try {
-      setIsCreatingProject(true);
-      const response = await projectsAPI.createProject({
-        name,
-        description: projectForm.description.trim(),
-      });
-      const created = response.data.project;
-      setProjects((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
-      setSelectedProjectId(created.id);
-      setShowProjectModal(false);
+      setIsSavingProject(true);
+      if (editingProjectId) {
+        const response = await projectsAPI.updateProject(editingProjectId, {
+          name,
+          description: projectForm.description.trim(),
+        });
+        const updated = response.data.project;
+        setProjects((prev) =>
+          prev.map((p) => (p.id === updated.id ? updated : p)).sort((a, b) => a.name.localeCompare(b.name))
+        );
+        toast.success('Project updated');
+      } else {
+        const response = await projectsAPI.createProject({
+          name,
+          description: projectForm.description.trim(),
+        });
+        const created = response.data.project;
+        setProjects((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
+        setSelectedProjectId(created.id);
+        toast.success('Project created');
+      }
+      setEditingProjectId(null);
       setProjectForm({ name: '', description: '' });
-      toast.success('Project created');
     } catch (error) {
-      console.error('Failed to create project:', error);
-      toast.error(error.response?.data?.message || 'Failed to create project');
+      console.error('Failed to save project:', error);
+      toast.error(error.response?.data?.message || 'Failed to save project');
     } finally {
-      setIsCreatingProject(false);
+      setIsSavingProject(false);
+    }
+  };
+
+  const startEditProject = (project) => {
+    setEditingProjectId(project.id);
+    setProjectForm({
+      name: project.name || '',
+      description: project.description || '',
+    });
+  };
+
+  const cancelProjectEdit = () => {
+    if (isSavingProject) return;
+    setEditingProjectId(null);
+    setProjectForm({ name: '', description: '' });
+  };
+
+  const deleteProject = async (project) => {
+    if (!project?.id || isDeletingProjectId) return;
+    const ok = window.confirm(`Delete project "${project.name}"?`);
+    if (!ok) return;
+    try {
+      setIsDeletingProjectId(project.id);
+      await projectsAPI.deleteProject(project.id);
+      setProjects((prev) => prev.filter((p) => p.id !== project.id));
+      if (selectedProjectId === project.id) {
+        setSelectedProjectId('');
+      }
+      if (editingProjectId === project.id) {
+        cancelProjectEdit();
+      }
+      toast.success('Project deleted');
+    } catch (error) {
+      console.error('Failed to delete project:', error);
+      toast.error(error.response?.data?.message || 'Failed to delete project');
+    } finally {
+      setIsDeletingProjectId('');
     }
   };
 
@@ -3100,10 +3260,40 @@ const TaskManagement = () => {
               </ProjectSelectShell>
             </ProjectSelectorWrap>
             <ProjectActions>
-              <CreateProjectButton type="button" onClick={() => setShowProjectModal(true)}>
-                <FolderPlus size={14} />
-                New Project
-              </CreateProjectButton>
+              <ProjectsTabButton
+                type="button"
+                onClick={() => setShowProjectsModal(true)}
+              >
+                <FolderKanban size={14} />
+                Projects
+              </ProjectsTabButton>
+            </ProjectActions>
+          </ProjectBar>
+          <HeaderActions>
+            <HeaderLeft>
+              <PageTitle>My Tasks</PageTitle>
+            </HeaderLeft>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+              <ViewModeToggle>
+                <ViewModeButton
+                  type="button"
+                  $active={activeView === 'kanban'}
+                  onClick={() => setActiveView('kanban')}
+                  aria-label="Board view"
+                  title="Board view"
+                >
+                  <Columns3 size={15} />
+                </ViewModeButton>
+                <ViewModeButton
+                  type="button"
+                  $active={activeView === 'list'}
+                  onClick={() => setActiveView('list')}
+                  aria-label="List view"
+                  title="List view"
+                >
+                  <List size={15} />
+                </ViewModeButton>
+              </ViewModeToggle>
               {canCreate && (
                 <AddTaskButton
                   onClick={() => {
@@ -3117,33 +3307,10 @@ const TaskManagement = () => {
                   title={selectedProjectId ? 'Add task in this project' : 'Create/select a project first'}
                 >
                   <Plus size={14} />
-                  {selectedProject ? `Add Task` : 'Add Task'}
+                  Add Task
                 </AddTaskButton>
               )}
-            </ProjectActions>
-          </ProjectBar>
-          <HeaderActions>
-            <HeaderLeft>
-              <PageTitle>My Tasks</PageTitle>
-              <ViewSwitch>
-                <ViewSwitchButton
-                  type="button"
-                  active={activeView === 'kanban'}
-                  onClick={() => setActiveView('kanban')}
-                >
-                  <Columns3 size={14} />
-                  Board
-                </ViewSwitchButton>
-                <ViewSwitchButton
-                  type="button"
-                  active={activeView === 'list'}
-                  onClick={() => setActiveView('list')}
-                >
-                  <List size={14} />
-                  List
-                </ViewSwitchButton>
-              </ViewSwitch>
-            </HeaderLeft>
+            </div>
           </HeaderActions>
 
           {!selectedProjectId && (
@@ -3388,59 +3555,118 @@ const TaskManagement = () => {
         </MainContent>
       </ContentWrapper>
 
-      {showProjectModal && (
-        <Modal onClick={() => !isCreatingProject && setShowProjectModal(false)}>
-          <ModalContent onClick={(e) => e.stopPropagation()} style={{ maxWidth: '520px' }}>
+      {showProjectsModal && (
+        <Modal
+          onClick={() => {
+            if (isSavingProject || isDeletingProjectId) return;
+            setShowProjectsModal(false);
+            cancelProjectEdit();
+          }}
+        >
+          <ModalContent onClick={(e) => e.stopPropagation()} style={{ maxWidth: '760px' }}>
             <ModalHeader>
-              <h2>Create Project</h2>
+              <h2>Manage Projects</h2>
               <CloseButton
                 onClick={() => {
-                  if (isCreatingProject) return;
-                  setShowProjectModal(false);
-                  setProjectForm({ name: '', description: '' });
+                  if (isSavingProject || isDeletingProjectId) return;
+                  setShowProjectsModal(false);
+                  cancelProjectEdit();
                 }}
               >
                 ×
               </CloseButton>
             </ModalHeader>
-            <ModalForm onSubmit={createProject}>
-              <FormGroup>
-                <label>Project name</label>
-                <input
+
+            <ProjectManagerHeader>
+              <h3>{editingProjectId ? 'Edit project' : 'Create a new project'}</h3>
+              <p>
+                Projects group your tasks. You can switch project from the dropdown in this page.
+                {!canManageProjects ? ' You have view-only access here.' : ''}
+              </p>
+            </ProjectManagerHeader>
+
+            {canManageProjects && (
+              <ProjectManagerForm onSubmit={saveProject}>
+                <ProjectManagerInput
                   type="text"
                   value={projectForm.name}
                   onChange={(e) => setProjectForm((prev) => ({ ...prev, name: e.target.value }))}
-                  placeholder="e.g. Website Redesign"
+                  placeholder="Project name"
                   required
-                  autoFocus
                 />
-              </FormGroup>
-              <FormGroup>
-                <label>Description (optional)</label>
-                <textarea
+                <ProjectManagerInput
+                  type="text"
                   value={projectForm.description}
                   onChange={(e) => setProjectForm((prev) => ({ ...prev, description: e.target.value }))}
-                  rows={4}
-                  placeholder="What is this project about?"
+                  placeholder="Description (optional)"
                 />
-              </FormGroup>
-              <ModalActions>
+                <ProjectManagerSubmit type="submit" disabled={isSavingProject}>
+                  {isSavingProject ? 'Saving...' : editingProjectId ? 'Update' : 'Create'}
+                </ProjectManagerSubmit>
+              </ProjectManagerForm>
+            )}
+
+            {canManageProjects && editingProjectId && (
+              <div style={{ marginBottom: 12 }}>
                 <ModalButton
                   type="button"
                   className="secondary"
-                  onClick={() => {
-                    if (isCreatingProject) return;
-                    setShowProjectModal(false);
-                    setProjectForm({ name: '', description: '' });
-                  }}
+                  onClick={cancelProjectEdit}
+                  disabled={isSavingProject}
                 >
-                  Cancel
+                  Cancel edit
                 </ModalButton>
-                <ModalButton type="submit" className="primary" disabled={isCreatingProject}>
-                  {isCreatingProject ? 'Creating...' : 'Create Project'}
-                </ModalButton>
-              </ModalActions>
-            </ModalForm>
+              </div>
+            )}
+
+            <ProjectManagerList>
+              {projects.length === 0 ? (
+                <EmptyState style={{ padding: '26px 14px' }}>
+                  <p style={{ fontSize: '13px' }}>No projects yet.</p>
+                </EmptyState>
+              ) : (
+                projects.map((project) => (
+                  <ProjectManagerItem key={project.id} $active={project.id === selectedProjectId}>
+                    <div>
+                      <div className="title">{project.name}</div>
+                      <div className="desc">{project.description || 'No description'}</div>
+                    </div>
+                    <ProjectManagerActions>
+                      <ProjectManagerAction
+                        type="button"
+                        onClick={() => {
+                          setSelectedProjectId(project.id);
+                          setShowProjectsModal(false);
+                        }}
+                        title="Select project"
+                      >
+                        <Check size={14} />
+                      </ProjectManagerAction>
+                      {canManageProjects && (
+                        <>
+                          <ProjectManagerAction
+                            type="button"
+                            onClick={() => startEditProject(project)}
+                            title="Edit project"
+                          >
+                            <Edit size={14} />
+                          </ProjectManagerAction>
+                          <ProjectManagerAction
+                            type="button"
+                            $danger
+                            onClick={() => deleteProject(project)}
+                            disabled={isDeletingProjectId === project.id}
+                            title="Delete project"
+                          >
+                            <Trash2 size={14} />
+                          </ProjectManagerAction>
+                        </>
+                      )}
+                    </ProjectManagerActions>
+                  </ProjectManagerItem>
+                ))
+              )}
+            </ProjectManagerList>
           </ModalContent>
         </Modal>
       )}

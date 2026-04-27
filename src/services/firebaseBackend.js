@@ -25,6 +25,7 @@ export const AVAILABLE_PERMISSIONS = [
   'tasks.update',
   'tasks.delete',
   'tasks.assign',
+  'projects.manage',
   'kanban.manage',
   'admin.access',
 ];
@@ -180,6 +181,18 @@ async function requireKanbanManage() {
   const teamsById = await loadTeamsById();
   const perms = computePermissions(data, teamsById);
   if (perms.includes('kanban.manage')) return u;
+  throw apiError('Forbidden', 403);
+}
+
+async function requireProjectsManage() {
+  const u = await requireAuth();
+  const db = getDb();
+  const snap = await getDoc(doc(db, 'users', u.uid));
+  const data = snap.data() || {};
+  if ((data.roles || []).includes('admin')) return u;
+  const teamsById = await loadTeamsById();
+  const perms = computePermissions(data, teamsById);
+  if (perms.includes('projects.manage')) return u;
   throw apiError('Forbidden', 403);
 }
 
@@ -613,7 +626,7 @@ export const firebaseProjectsApi = {
     },
 
   async createProject(body) {
-      const u = await requireAuth();
+      const u = await requireProjectsManage();
       const name = String(body?.name || '').trim();
       if (!name) throw apiError('Project name is required', 400);
       const db = getDb();
@@ -632,6 +645,48 @@ export const firebaseProjectsApi = {
       await setDoc(pref, payload);
       const snap = await getDoc(pref);
       return { data: { project: projectDocToProject(pref.id, snap.data()) } };
+    },
+
+  async updateProject(id, body) {
+      const u = await requireProjectsManage();
+      const db = getDb();
+      const pref = doc(db, 'projects', id);
+      const snap = await getDoc(pref);
+      if (!snap.exists()) throw apiError('Project not found', 404);
+      const existing = snap.data();
+      const name = String(body?.name || '').trim();
+      if (!name) throw apiError('Project name is required', 400);
+      const patch = {
+        name: name.slice(0, 80),
+        description: String(body?.description || '').trim(),
+        updatedAt: serverTimestamp(),
+      };
+      if (body?.color !== undefined) {
+        patch.color = /^#[0-9A-Fa-f]{6}$/.test(String(body.color || '').trim())
+          ? String(body.color).trim()
+          : existing.color || '#3b82f6';
+      }
+      await updateDoc(pref, patch);
+      const next = await getDoc(pref);
+      return { data: { project: projectDocToProject(id, next.data()) } };
+    },
+
+  async deleteProject(id) {
+      const u = await requireProjectsManage();
+      const db = getDb();
+      const pref = doc(db, 'projects', id);
+      const snap = await getDoc(pref);
+      if (!snap.exists()) throw apiError('Project not found', 404);
+      const existing = snap.data();
+      const taskSnap = await getDocs(
+        query(collection(db, 'tasks'), where('projectId', '==', id), where('isArchived', '==', false))
+      );
+      if (!taskSnap.empty) {
+        throw apiError('Please archive or move project tasks before deleting this project', 400);
+      }
+
+      await deleteDoc(pref);
+      return { data: { message: 'Project deleted' } };
     },
 };
 

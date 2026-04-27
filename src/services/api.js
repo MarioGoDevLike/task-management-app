@@ -59,6 +59,8 @@ export const kanbanAPI = {
 export const projectsAPI = {
   listProjects: () => firebaseProjectsApi.listProjects(),
   createProject: (body) => firebaseProjectsApi.createProject(body),
+  updateProject: (id, body) => firebaseProjectsApi.updateProject(id, body),
+  deleteProject: (id) => firebaseProjectsApi.deleteProject(id),
 };
 
 export async function healthCheck() {
