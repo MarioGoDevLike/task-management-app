@@ -19,6 +19,7 @@ import {
   updateDoc,
   where,
 } from 'firebase/firestore';
+import { SectionLoader } from './AppLoader';
 
 const Container = styled.div`
   min-height: 100vh;
@@ -104,12 +105,31 @@ const MainTitle = styled.h2`
 
 const ViewSelect = styled.select`
   height: 34px;
-  border-radius: 8px;
-  border: 1px solid #d1d5db;
-  padding: 0 10px;
+  border-radius: 10px;
+  border: 1px solid #bfdbfe;
+  padding: 0 34px 0 12px;
   font-size: 13px;
   font-weight: 600;
-  color: #374151;
+  color: #0f172a;
+  appearance: none;
+  cursor: pointer;
+  background: linear-gradient(135deg, #ffffff 0%, #eff6ff 100%);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='none' stroke='%2364748b' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round' d='M3 4.5 6 7.5 9 4.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 11px center;
+  transition: all 0.18s ease;
+
+  &:hover {
+    border-color: #93c5fd;
+    box-shadow: 0 2px 6px rgba(30, 64, 175, 0.1);
+  }
+
+  &:focus {
+    outline: none;
+    border-color: #60a5fa;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.14);
+  }
 `;
 
 const AddButton = styled.button`
@@ -220,33 +240,6 @@ const DayCell = styled.button`
   color: ${(p) => (p.$isSelected ? '#fff' : p.$isCurrentMonth ? '#111827' : '#9ca3af')};
   font-size: 12px;
   cursor: pointer;
-`;
-
-const SectionDivider = styled.div`
-  height: 1px;
-  background: #e5e7eb;
-  margin: 12px 0;
-`;
-
-const ListSection = styled.div`
-  .heading {
-    font-size: 12px;
-    font-weight: 700;
-    color: #374151;
-    margin-bottom: 8px;
-  }
-`;
-
-const CalendarListItem = styled.label`
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: #374151;
-  margin-bottom: 6px;
-  input {
-    accent-color: #1a73e8;
-  }
 `;
 
 const UpcomingList = styled.div`
@@ -479,6 +472,7 @@ export default function CalendarPage() {
   const calendarRef = useRef(null);
   const ownerId = user?._id || user?.id;
   const [meetings, setMeetings] = useState([]);
+  const [isLoadingMeetings, setIsLoadingMeetings] = useState(true);
   const [showMeetingModal, setShowMeetingModal] = useState(false);
   const [editingMeetingId, setEditingMeetingId] = useState(null);
   const [meetingForm, setMeetingForm] = useState({
@@ -514,6 +508,7 @@ export default function CalendarPage() {
 
   useEffect(() => {
     if (!ownerId) return undefined;
+    setIsLoadingMeetings(true);
     const db = getDb();
     const q = query(collection(db, 'meetings'), where('ownerId', '==', ownerId));
     const unsub = onSnapshot(
@@ -535,8 +530,12 @@ export default function CalendarPage() {
           });
         });
         setMeetings(list);
+        setIsLoadingMeetings(false);
       },
-      () => toast.error('Failed to load meetings')
+      () => {
+        setIsLoadingMeetings(false);
+        toast.error('Failed to load meetings');
+      }
     );
     return () => unsub();
   }, [ownerId]);
@@ -751,19 +750,6 @@ export default function CalendarPage() {
             <Search size={14} />
             Search for people
           </SearchPeople>
-          <SectionDivider />
-          <ListSection>
-            <div className="heading">My calendars</div>
-            <CalendarListItem><input type="checkbox" defaultChecked /> Mario Nassar</CalendarListItem>
-            <CalendarListItem><input type="checkbox" defaultChecked /> Birthdays</CalendarListItem>
-            <CalendarListItem><input type="checkbox" defaultChecked /> Tasks</CalendarListItem>
-          </ListSection>
-          <SectionDivider />
-          <ListSection>
-            <div className="heading">Other calendars</div>
-            <CalendarListItem><input type="checkbox" defaultChecked /> Holidays</CalendarListItem>
-            <CalendarListItem><input type="checkbox" defaultChecked /> Team Events</CalendarListItem>
-          </ListSection>
 
           <UpcomingList>
             <PanelTitle>Upcoming</PanelTitle>
@@ -785,44 +771,48 @@ export default function CalendarPage() {
         </SidePanel>
 
         <CalendarShell>
-          <FullCalendar
-            ref={calendarRef}
-            plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
-            initialView={viewType}
-            headerToolbar={false}
-            editable
-            selectable
-            selectMirror
-            dayMaxEvents
-            events={meetings}
-            height="calc(100vh - 210px)"
-            slotMinTime="00:00:00"
-            slotMaxTime="24:00:00"
-            slotDuration="01:00:00"
-            slotLabelInterval="01:00:00"
-            allDaySlot={false}
-            nowIndicator
-            scrollTime="00:00:00"
-            slotLabelFormat={{
-              hour: 'numeric',
-              minute: '2-digit',
-              hour12: true,
-            }}
-            eventDisplay="block"
-            eventBackgroundColor="#1a73e8"
-            eventBorderColor="#1557b0"
-            eventTextColor="#ffffff"
-            select={(selection) =>
-              openForRange(selection.startStr.slice(0, 16), selection.endStr.slice(0, 16), selection.allDay)
-            }
-            eventClick={(clickInfo) => openForEvent(clickInfo.event)}
-            eventDrop={handleDropResize}
-            eventResize={handleDropResize}
-            datesSet={(arg) => {
-              setTitleText(arg.view.title);
-              setViewType(arg.view.type);
-            }}
-          />
+          {isLoadingMeetings ? (
+            <SectionLoader message="Loading calendar events" minHeight="440px" />
+          ) : (
+            <FullCalendar
+              ref={calendarRef}
+              plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
+              initialView={viewType}
+              headerToolbar={false}
+              editable
+              selectable
+              selectMirror
+              dayMaxEvents
+              events={meetings}
+              height="calc(100vh - 210px)"
+              slotMinTime="00:00:00"
+              slotMaxTime="24:00:00"
+              slotDuration="01:00:00"
+              slotLabelInterval="01:00:00"
+              allDaySlot={false}
+              nowIndicator
+              scrollTime="00:00:00"
+              slotLabelFormat={{
+                hour: 'numeric',
+                minute: '2-digit',
+                hour12: true,
+              }}
+              eventDisplay="block"
+              eventBackgroundColor="#1a73e8"
+              eventBorderColor="#1557b0"
+              eventTextColor="#ffffff"
+              select={(selection) =>
+                openForRange(selection.startStr.slice(0, 16), selection.endStr.slice(0, 16), selection.allDay)
+              }
+              eventClick={(clickInfo) => openForEvent(clickInfo.event)}
+              eventDrop={handleDropResize}
+              eventResize={handleDropResize}
+              datesSet={(arg) => {
+                setTitleText(arg.view.title);
+                setViewType(arg.view.type);
+              }}
+            />
+          )}
         </CalendarShell>
       </Layout>
 

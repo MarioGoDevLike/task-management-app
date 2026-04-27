@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { adminAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
+import { SectionLoader } from './AppLoader';
 
 const DashboardContainer = styled.div`
   padding: 32px;
@@ -178,28 +179,30 @@ const SearchInput = styled.div`
 
 const Select = styled.select`
   padding: 14px 16px;
-  border: 2px solid #e2e8f0;
+  border: 1px solid #bfdbfe;
   border-radius: 12px;
   font-size: 14px;
   color: #0f172a;
-  background: white;
+  background: linear-gradient(135deg, #ffffff 0%, #eff6ff 100%);
   cursor: pointer;
   transition: all 0.2s ease;
-  font-weight: 500;
+  font-weight: 600;
   appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23475569' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='none' stroke='%2364748b' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round' d='M3 4.5 6 7.5 9 4.5'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 16px center;
   padding-right: 40px;
   
   &:focus {
     outline: none;
-    border-color: #3b82f6;
-    box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
+    border-color: #60a5fa;
+    box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.14);
   }
   
   &:hover {
-    border-color: #cbd5e1;
+    border-color: #93c5fd;
+    box-shadow: 0 2px 6px rgba(30, 64, 175, 0.1);
   }
   
   option {
@@ -492,15 +495,6 @@ const UserOption = styled.button`
       color: #64748b;
     }
   }
-`;
-
-const LoadingSpinner = styled.div`
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 60px;
-  color: #64748b;
-  gap: 12px;
 `;
 
 const EmptyState = styled.div`
@@ -884,10 +878,7 @@ const AdminDashboard = () => {
       </Header>
 
       {loadingStats ? (
-          <LoadingSpinner>
-            <Loader2 size={20} style={{ animation: 'spin 1s linear infinite' }} />
-            Loading statistics...
-          </LoadingSpinner>
+          <SectionLoader message="Loading statistics" minHeight="220px" />
       ) : stats && (
         <StatsGrid>
           <StatCard>
@@ -1042,10 +1033,7 @@ const AdminDashboard = () => {
         </TableHeader>
 
         {loading ? (
-          <LoadingSpinner>
-            <Loader2 size={20} style={{ animation: 'spin 1s linear infinite' }} />
-            Loading tasks...
-          </LoadingSpinner>
+          <SectionLoader message="Loading tasks" minHeight="260px" />
         ) : tasks.length === 0 ? (
           <EmptyState>
             <FileText size={48} />

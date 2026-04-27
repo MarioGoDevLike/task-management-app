@@ -319,6 +319,7 @@ const DashboardLayout = () => {
   const closeSidebar = () => setIsSidebarOpen(false);
 
   const isAdmin = user?.roles?.includes('admin');
+  const canOpenSettings = isAdmin || user?.permissions?.includes('kanban.manage');
 
   return (
     <LayoutWrapper>
@@ -357,7 +358,6 @@ const DashboardLayout = () => {
             <span className="nav-label">Calendar</span>
           </StyledNavLink>
           {isAdmin && (
-            <>
               <StyledNavLink
                 to="/admin"
                 $collapsed={isCollapsed}
@@ -365,6 +365,8 @@ const DashboardLayout = () => {
                 <LayoutDashboard size={18} />
                 <span className="nav-label">Dashboard</span>
               </StyledNavLink>
+          )}
+          {canOpenSettings && (
               <StyledNavLink
                 to="/settings"
                 $collapsed={isCollapsed}
@@ -372,7 +374,6 @@ const DashboardLayout = () => {
                 <SettingsIcon size={18} />
                 <span className="nav-label">Settings</span>
               </StyledNavLink>
-            </>
           )}
         </Navigation>
 

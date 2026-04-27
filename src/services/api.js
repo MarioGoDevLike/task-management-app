@@ -3,7 +3,13 @@ import {
   firebaseTasksApi,
   firebaseAdminApi,
   firebaseTeamsApi,
+  firebaseKanbanApi,
+  firebaseProjectsApi,
+  DEFAULT_KANBAN_COLUMNS,
+  normalizeKanbanColumns,
 } from './firebaseBackend';
+
+export { DEFAULT_KANBAN_COLUMNS, normalizeKanbanColumns };
 
 export const authAPI = {
   register: (userData) => firebaseAuthApi.register(userData),
@@ -43,6 +49,16 @@ export const teamsAPI = {
   updateTeam: (id, teamData) => firebaseTeamsApi.updateTeam(id, teamData),
   deleteTeam: (id) => firebaseTeamsApi.deleteTeam(id),
   getAvailablePermissions: () => firebaseTeamsApi.getAvailablePermissions(),
+};
+
+export const kanbanAPI = {
+  getKanbanColumns: () => firebaseKanbanApi.getKanbanColumns(),
+  saveKanbanColumns: (body) => firebaseKanbanApi.saveKanbanColumns(body),
+};
+
+export const projectsAPI = {
+  listProjects: () => firebaseProjectsApi.listProjects(),
+  createProject: (body) => firebaseProjectsApi.createProject(body),
 };
 
 export async function healthCheck() {

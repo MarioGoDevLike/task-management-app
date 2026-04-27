@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import styled, { keyframes } from 'styled-components';
 import { toast } from 'react-hot-toast';
 import {
@@ -18,9 +19,12 @@ import {
   Edit,
   Trash2,
   AlertTriangle,
+  LayoutGrid,
+  ChevronUp,
+  ChevronDown,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { adminAPI, teamsAPI } from '../services/api';
+import { adminAPI, teamsAPI, kanbanAPI, DEFAULT_KANBAN_COLUMNS, normalizeKanbanColumns } from '../services/api';
 
 const PageWrapper = styled.div`
   min-height: calc(100vh - 80px);
@@ -628,19 +632,20 @@ const FormGroup = styled.div`
   input,
   select {
     padding: 12px 16px;
-    border: 2px solid #e2e8f0;
+    border: 1px solid #bfdbfe;
     border-radius: 12px;
     font-size: 14px;
     transition: all 0.2s ease;
-    background: #fafbfc;
+    background: linear-gradient(135deg, #ffffff 0%, #eff6ff 100%);
     color: #0f172a;
     font-family: inherit;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
 
     &:focus {
       outline: none;
-      border-color: #3b82f6;
+      border-color: #60a5fa;
       background: white;
-      box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
+      box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.14);
     }
 
     &::placeholder {
@@ -650,6 +655,16 @@ const FormGroup = styled.div`
 
   select {
     cursor: pointer;
+    appearance: none;
+    padding-right: 40px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='none' stroke='%2364748b' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round' d='M3 4.5 6 7.5 9 4.5'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 14px center;
+
+    &:hover {
+      border-color: #93c5fd;
+      box-shadow: 0 2px 6px rgba(30, 64, 175, 0.1);
+    }
   }
 `;
 
@@ -886,6 +901,7 @@ const roleOptions = [
 
 const SettingsPage = () => {
   const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState('roles');
   const [users, setUsers] = useState([]);
@@ -921,22 +937,44 @@ const SettingsPage = () => {
     icon: 'users',
     permissions: [],
   });
+  const [kanbanDraft, setKanbanDraft] = useState(() => normalizeKanbanColumns(DEFAULT_KANBAN_COLUMNS));
+  const [isLoadingKanban, setIsLoadingKanban] = useState(false);
+  const [isSavingKanban, setIsSavingKanban] = useState(false);
 
-  const tabs = useMemo(() => [
-    {
-      id: 'roles',
-      label: 'Users & Roles',
-      description: 'Manage users and assign roles to control workspace access.',
-      icon: UserCog,
-      keywords: ['users', 'roles', 'access', 'security', 'admin'],
-    },
-    {
-      id: 'teams',
-      label: 'Teams & Permissions',
-      description: 'Create custom teams and configure granular permissions.',
-      icon: ShieldCheck,
-      keywords: ['teams', 'permissions', 'custom', 'groups', 'access control'],
-    },
+  const canManageRoles = user?.roles?.includes('admin');
+  const canManageKanban =
+    user?.roles?.includes('admin') || user?.permissions?.includes('kanban.manage');
+
+  const tabs = useMemo(() => {
+    const base = [];
+    if (canManageRoles) {
+      base.push(
+        {
+          id: 'roles',
+          label: 'Users & Roles',
+          description: 'Manage users and assign roles to control workspace access.',
+          icon: UserCog,
+          keywords: ['users', 'roles', 'access', 'security', 'admin'],
+        },
+        {
+          id: 'teams',
+          label: 'Teams & Permissions',
+          description: 'Create custom teams and configure granular permissions.',
+          icon: ShieldCheck,
+          keywords: ['teams', 'permissions', 'custom', 'groups', 'access control'],
+        }
+      );
+    }
+    if (canManageKanban) {
+      base.push({
+        id: 'kanban',
+        label: 'Kanban board',
+        description: 'Add, rename, reorder, and color task columns (e.g. Pending, In progress, Done).',
+        icon: LayoutGrid,
+        keywords: ['kanban', 'board', 'columns', 'workflow', 'status', 'pending', 'in progress'],
+      });
+    }
+    base.push(
     {
       id: 'notifications',
       label: 'Notifications & Automations',
@@ -961,13 +999,25 @@ const SettingsPage = () => {
       keywords: ['workspace', 'preferences', 'branding', 'templates', 'defaults'],
       comingSoon: true,
     },
-  ], []);
-
-  const canManageRoles = user?.roles?.includes('admin');
+    );
+    return base;
+  }, [canManageRoles, canManageKanban]);
   const activeTabDefinition = useMemo(
     () => tabs.find(tab => tab.id === activeTab) || tabs[0],
     [tabs, activeTab]
   );
+
+  useEffect(() => {
+    if (!tabs.length) return;
+    const tabFromUrl = searchParams.get('tab');
+    if (tabFromUrl && tabs.some((t) => t.id === tabFromUrl)) {
+      if (activeTab !== tabFromUrl) setActiveTab(tabFromUrl);
+      return;
+    }
+    if (!tabs.some((t) => t.id === activeTab)) {
+      setActiveTab(tabs[0].id);
+    }
+  }, [tabs, activeTab, searchParams]);
 
   const normalizedSearchTerm = searchTerm.trim().toLowerCase();
 
@@ -991,10 +1041,9 @@ const SettingsPage = () => {
   );
 
   useEffect(() => {
-    if (!canManageRoles) return;
-
     const fetchData = async () => {
       if (activeTab === 'roles') {
+        if (!canManageRoles) return;
         setIsLoadingUsers(true);
         try {
           const response = await adminAPI.listUsers();
@@ -1006,6 +1055,7 @@ const SettingsPage = () => {
           setIsLoadingUsers(false);
         }
       } else if (activeTab === 'teams') {
+        if (!canManageRoles) return;
         setIsLoadingTeams(true);
         try {
           const [teamsResponse, permissionsResponse] = await Promise.all([
@@ -1020,11 +1070,23 @@ const SettingsPage = () => {
         } finally {
           setIsLoadingTeams(false);
         }
+      } else if (activeTab === 'kanban') {
+        if (!canManageKanban) return;
+        setIsLoadingKanban(true);
+        try {
+          const res = await kanbanAPI.getKanbanColumns();
+          setKanbanDraft(normalizeKanbanColumns(res.data.columns || DEFAULT_KANBAN_COLUMNS));
+        } catch (error) {
+          console.error('Failed to load kanban:', error);
+          toast.error(error.response?.data?.message || 'Unable to load Kanban columns.');
+        } finally {
+          setIsLoadingKanban(false);
+        }
       }
     };
 
     fetchData();
-  }, [canManageRoles, activeTab]);
+  }, [canManageRoles, canManageKanban, activeTab]);
 
   const roleStats = useMemo(() => ({
     total: users.length,
@@ -1095,6 +1157,7 @@ const SettingsPage = () => {
 
   const handleSearchResultSelect = (tabId) => {
     setActiveTab(tabId);
+    setSearchParams({ tab: tabId });
     setSearchTerm('');
     if (tabId === 'roles') {
       setUserFilter('');
@@ -1110,6 +1173,7 @@ const SettingsPage = () => {
 
   const handleTabSelection = (tabId) => {
     setActiveTab(tabId);
+    setSearchParams({ tab: tabId });
     setSearchTerm('');
     if (tabId === 'roles') {
       setUserFilter('');
@@ -1357,15 +1421,17 @@ const SettingsPage = () => {
     }));
   };
 
-  if (!canManageRoles) {
+  const canAccessSettings = canManageRoles || canManageKanban;
+
+  if (!canAccessSettings) {
     return (
       <PageWrapper>
         <RestrictedState>
           <ShieldCheck size={42} color="#2563eb" />
           <h2>Restricted Access</h2>
           <p>
-            You need administrator permissions to manage roles and permissions. Contact an administrator if you believe
-            this is an error.
+            You need administrator access or the Kanban management permission to open Settings. Contact an administrator
+            if you believe this is an error.
           </p>
         </RestrictedState>
       </PageWrapper>
@@ -1833,6 +1899,195 @@ const SettingsPage = () => {
               </UsersList>
             )}
             </UsersSection>
+          </>
+        ) : activeTab === 'kanban' ? (
+          <>
+            <div style={{ marginBottom: '24px' }}>
+              <h2 style={{ fontSize: '22px', fontWeight: 700, color: '#0f172a', margin: '0 0 8px 0' }}>
+                Kanban board
+              </h2>
+              <p style={{ fontSize: '14px', color: '#64748b', margin: 0 }}>
+                Add or rename columns (e.g. Backlog, Review, Done). They appear left-to-right on the Tasks board. Mark exactly one column as <strong>Done column</strong> (completion + stats).
+              </p>
+            </div>
+            {isLoadingKanban ? (
+              <LoadingWrapper>
+                <Spinner size={18} />
+                Loading Kanban configuration…
+              </LoadingWrapper>
+            ) : (
+              <UsersSection>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
+                  <CreateUserButton
+                    type="button"
+                    onClick={async () => {
+                      setIsSavingKanban(true);
+                      try {
+                        const res = await kanbanAPI.saveKanbanColumns({ columns: kanbanDraft });
+                        setKanbanDraft(normalizeKanbanColumns(res.data.columns));
+                        toast.success('Kanban columns saved.');
+                      } catch (e) {
+                        toast.error(e.response?.data?.message || 'Failed to save.');
+                      } finally {
+                        setIsSavingKanban(false);
+                      }
+                    }}
+                    disabled={isSavingKanban}
+                  >
+                    {isSavingKanban ? <Spinner size={16} /> : null}
+                    Save columns
+                  </CreateUserButton>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {kanbanDraft.map((col, index) => (
+                    <UserRow key={col.id} style={{ alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 200, flex: 1 }}>
+                        <label style={{ fontSize: 12, fontWeight: 600, color: '#64748b' }}>Label</label>
+                        <input
+                          type="text"
+                          value={col.label}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setKanbanDraft((prev) =>
+                              prev.map((c, i) => (i === index ? { ...c, label: v } : c))
+                            );
+                          }}
+                          style={{
+                            padding: '10px 12px',
+                            borderRadius: 8,
+                            border: '1.5px solid #e2e8f0',
+                            fontSize: 14,
+                          }}
+                        />
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: 120 }}>
+                        <label style={{ fontSize: 12, fontWeight: 600, color: '#64748b' }}>Color</label>
+                        <input
+                          type="color"
+                          value={col.color}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setKanbanDraft((prev) =>
+                              prev.map((c, i) => (i === index ? { ...c, color: v } : c))
+                            );
+                          }}
+                          style={{ height: 40, border: 'none', cursor: 'pointer' }}
+                        />
+                      </div>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13, fontWeight: 600, color: '#334155' }}>
+                        <input
+                          type="radio"
+                          name="kanban-done-col"
+                          checked={!!col.isDone}
+                          onChange={() => {
+                            setKanbanDraft((prev) =>
+                              prev.map((c, i) => ({ ...c, isDone: i === index }))
+                            );
+                          }}
+                        />
+                        Done column
+                      </label>
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        <button
+                          type="button"
+                          disabled={index === 0}
+                          onClick={() => {
+                            setKanbanDraft((prev) => {
+                              if (index === 0) return prev;
+                              const next = [...prev];
+                              [next[index - 1], next[index]] = [next[index], next[index - 1]];
+                              return next.map((c, i) => ({ ...c, order: i }));
+                            });
+                          }}
+                          style={{
+                            padding: 8,
+                            borderRadius: 8,
+                            border: '1px solid #e2e8f0',
+                            background: '#fff',
+                            cursor: index === 0 ? 'not-allowed' : 'pointer',
+                          }}
+                        >
+                          <ChevronUp size={16} />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={index === kanbanDraft.length - 1}
+                          onClick={() => {
+                            setKanbanDraft((prev) => {
+                              if (index >= prev.length - 1) return prev;
+                              const next = [...prev];
+                              [next[index], next[index + 1]] = [next[index + 1], next[index]];
+                              return next.map((c, i) => ({ ...c, order: i }));
+                            });
+                          }}
+                          style={{
+                            padding: 8,
+                            borderRadius: 8,
+                            border: '1px solid #e2e8f0',
+                            background: '#fff',
+                            cursor: index === kanbanDraft.length - 1 ? 'not-allowed' : 'pointer',
+                          }}
+                        >
+                          <ChevronDown size={16} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (kanbanDraft.length <= 1) {
+                              toast.error('Keep at least one column.');
+                              return;
+                            }
+                            setKanbanDraft((prev) => {
+                              const next = prev.filter((_, i) => i !== index);
+                              if (!next.some((c) => c.isDone) && next.length) {
+                                next[next.length - 1] = { ...next[next.length - 1], isDone: true };
+                              }
+                              return next.map((c, i) => ({ ...c, order: i }));
+                            });
+                          }}
+                          style={{
+                            padding: '8px 12px',
+                            borderRadius: 8,
+                            border: '1px solid #fecaca',
+                            background: '#fff',
+                            color: '#dc2626',
+                            fontWeight: 600,
+                            fontSize: 12,
+                          }}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                      <span style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'monospace' }}>id: {col.id}</span>
+                    </UserRow>
+                  ))}
+                </div>
+                <div style={{ marginTop: 16 }}>
+                  <CreateUserButton
+                    type="button"
+                    onClick={() => {
+                      setKanbanDraft((prev) => {
+                        const n = prev.length + 1;
+                        const id = `column-${Date.now()}`;
+                        return [
+                          ...prev,
+                          {
+                            id,
+                            label: `New column ${n}`,
+                            color: '#64748b',
+                            order: prev.length,
+                            isDone: false,
+                          },
+                        ];
+                      });
+                    }}
+                  >
+                    <UserPlus size={16} />
+                    Add column
+                  </CreateUserButton>
+                </div>
+              </UsersSection>
+            )}
           </>
         ) : (
           <PlaceholderCard>

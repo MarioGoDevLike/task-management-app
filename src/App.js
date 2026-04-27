@@ -10,13 +10,14 @@ import CalendarPage from './components/CalendarPage';
 import SettingsPage from './components/SettingsPage';
 import AdminDashboard from './components/AdminDashboard';
 import DashboardLayout from './components/DashboardLayout';
+import { FullPageLoader } from './components/AppLoader';
 import './App.css';
 
 const AppContent = () => {
   const { isAuthenticated, isLoading, login } = useAuth();
 
   if (isLoading) {
-    return null; // Loading handled by ProtectedRoute
+    return <FullPageLoader message="Preparing your workspace" />;
   }
 
   if (!isAuthenticated) {

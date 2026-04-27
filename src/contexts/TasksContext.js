@@ -39,6 +39,7 @@ function mapDocToTask(id, data, userById) {
     status: data.status || 'pending',
     priority: data.priority || 'medium',
     dueDate: data.dueDate,
+    projectId: data.projectId || '',
     isArchived: !!data.isArchived,
     user: hydrateUser(ownerId),
     assignees: assignees.length ? assignees : ownerId ? [hydrateUser(ownerId)] : [],

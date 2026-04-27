@@ -3,9 +3,10 @@ import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import styled from 'styled-components';
 import { useAuth } from '../contexts/AuthContext';
 import { useTasks } from '../contexts/TasksContext';
-import { tasksAPI, adminAPI } from '../services/api';
+import { tasksAPI, adminAPI, projectsAPI, DEFAULT_KANBAN_COLUMNS, normalizeKanbanColumns } from '../services/api';
 import { toast } from 'react-hot-toast';
 import { getDb } from '../firebase/app';
+import { SectionLoader } from './AppLoader';
 import {
   collection,
   addDoc,
@@ -31,13 +32,81 @@ import {
   Users,
   Search,
   Columns3,
-  List
+  List,
+  FolderKanban,
+  FolderPlus,
+  ChevronDown,
+  Check,
+  Plus,
 } from 'lucide-react';
+
+/** Plain-text description from the create-task form → safe HTML for Firestore. */
+function plainTextToSafeDescriptionHtml(text) {
+  if (!text || !String(text).trim()) return '';
+  const lines = String(text).split(/\n/);
+  const escaped = lines.map((line) =>
+    line
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+  );
+  return `<p>${escaped.join('<br>')}</p>`;
+}
+
+function isYmdDateString(v) {
+  return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
+}
+
+function toDateInputValue(value) {
+  if (!value) return '';
+  if (isYmdDateString(value)) return value;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function getDueDayBounds(dueDate) {
+  if (!dueDate) return null;
+  if (isYmdDateString(dueDate)) {
+    const start = new Date(`${dueDate}T00:00:00`);
+    const end = new Date(`${dueDate}T23:59:59`);
+    return { start, end };
+  }
+  const d = new Date(dueDate);
+  if (Number.isNaN(d.getTime())) return null;
+  const start = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0);
+  const end = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59);
+  return { start, end };
+}
+
+function getDueVariant(dueDate) {
+  const bounds = getDueDayBounds(dueDate);
+  if (!bounds) return null;
+  const now = new Date();
+  if (bounds.end.getTime() < now.getTime()) return 'overdue';
+  if (bounds.start.getTime() <= now.getTime() && bounds.end.getTime() >= now.getTime()) return 'today';
+  return 'upcoming';
+}
+
+function formatDueLabel(dueDate) {
+  const bounds = getDueDayBounds(dueDate);
+  if (!bounds) return '';
+  const due = bounds.start;
+  return due.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
 
 const Container = styled.div`
   min-height: 100vh;
   background: white;
   padding: 24px 16px;
+
+  @media (max-width: 768px) {
+    padding: 12px 10px;
+  }
 `;
 
 const ContentWrapper = styled.div`
@@ -76,16 +145,13 @@ const WelcomeSection = styled.div`
 
 const StatsGrid = styled.div`
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
-  margin-bottom: 24px;
-  
-  @media (max-width: 1200px) {
-    grid-template-columns: repeat(2, 1fr);
-  }
-  
-  @media (max-width: 600px) {
-    grid-template-columns: 1fr;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+
+  @media (max-width: 768px) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
   }
 `;
 
@@ -139,6 +205,26 @@ const StatCard = styled.div`
     margin-top: 8px;
     font-weight: 500;
   }
+
+  @media (max-width: 768px) {
+    padding: 14px 12px;
+    border-radius: 12px;
+
+    .label {
+      font-size: 10px;
+      margin-bottom: 8px;
+    }
+
+    .value {
+      font-size: 24px;
+      letter-spacing: -0.4px;
+    }
+
+    .trend {
+      font-size: 10px;
+      margin-top: 6px;
+    }
+  }
 `;
 
 const MainContent = styled.div`
@@ -146,11 +232,16 @@ const MainContent = styled.div`
   border: 1px solid #e8ecf0;
   border-radius: 14px;
   padding: 14px;
+
+  @media (max-width: 768px) {
+    border-radius: 10px;
+    padding: 10px;
+  }
 `;
 
 const KanbanBoard = styled.div`
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 12px;
   padding: 0;
   height: calc(100vh - 320px);
@@ -160,6 +251,10 @@ const KanbanBoard = styled.div`
   @media (max-width: 1024px) {
     grid-template-columns: 1fr;
     height: auto;
+  }
+
+  @media (max-width: 768px) {
+    gap: 10px;
   }
 `;
 
@@ -171,6 +266,10 @@ const KanbanColumn = styled.div`
   flex-direction: column;
   min-height: 100%;
   border: 1px solid #e2e8f0;
+
+  @media (max-width: 768px) {
+    padding: 10px;
+  }
 `;
 
 const ColumnHeader = styled.div`
@@ -239,15 +338,21 @@ const ColumnTasks = styled.div`
 const ListViewShell = styled.div`
   border: 1px solid #e2e8f0;
   border-radius: 10px;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: auto;
   background: #fff;
   max-height: calc(100vh - 320px);
-  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+
+  @media (max-width: 768px) {
+    max-height: none;
+  }
 `;
 
 const ListHeaderRow = styled.div`
   display: grid;
   grid-template-columns: minmax(280px, 2fr) 120px 140px 180px 180px;
+  min-width: 900px;
   gap: 10px;
   padding: 10px 12px;
   background: #f8fafc;
@@ -262,6 +367,7 @@ const ListHeaderRow = styled.div`
 const ListRow = styled.div`
   display: grid;
   grid-template-columns: minmax(280px, 2fr) 120px 140px 180px 180px;
+  min-width: 900px;
   gap: 10px;
   padding: 10px 12px;
   border-bottom: 1px solid #f1f5f9;
@@ -298,14 +404,7 @@ const StatusChip = styled.span`
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.2px;
-  background: ${(props) =>
-    props.status === 'completed' ? '#dcfce7' :
-    props.status === 'in-progress' ? '#dbeafe' :
-    '#fef3c7'};
-  color: ${(props) =>
-    props.status === 'completed' ? '#166534' :
-    props.status === 'in-progress' ? '#1d4ed8' :
-    '#92400e'};
+  color: #0f172a;
 `;
 
 const KanbanTask = styled.div`
@@ -393,6 +492,34 @@ const KanbanTaskPriorityBadge = styled.span`
   }};
 `;
 
+const DueBadge = styled.span`
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  text-transform: uppercase;
+  white-space: nowrap;
+  background: ${(p) => {
+    if (p.$variant === 'overdue') return '#fee2e2';
+    if (p.$variant === 'today') return '#dbeafe';
+    return '#fef3c7';
+  }};
+  color: ${(p) => {
+    if (p.$variant === 'overdue') return '#991b1b';
+    if (p.$variant === 'today') return '#1d4ed8';
+    return '#92400e';
+  }};
+  border: ${(p) => {
+    if (p.$variant === 'overdue') return '1px solid #fecaca';
+    if (p.$variant === 'today') return '1px solid #bfdbfe';
+    return '1px solid #fde68a';
+  }};
+`;
+
 const KanbanTaskAssignee = styled.div`
   display: flex;
   align-items: center;
@@ -460,6 +587,36 @@ const KanbanTaskActions = styled.div`
   gap: 2px;
   flex-wrap: wrap;
   margin-left: auto;
+  align-items: center;
+`;
+
+const MoveStatusSelect = styled.select`
+  font-size: 10px;
+  font-weight: 600;
+  padding: 4px 24px 4px 8px;
+  border-radius: 8px;
+  border: 1px solid #bfdbfe;
+  background: linear-gradient(135deg, #ffffff 0%, #eff6ff 100%);
+  color: #475569;
+  max-width: 118px;
+  cursor: pointer;
+  appearance: none;
+  transition: all 0.18s ease;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='none' stroke='%2364748b' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round' d='M3 4.5 6 7.5 9 4.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 7px center;
+
+  &:hover {
+    border-color: #93c5fd;
+    box-shadow: 0 2px 6px rgba(30, 64, 175, 0.1);
+  }
+
+  &:focus {
+    outline: none;
+    border-color: #60a5fa;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.14);
+  }
 `;
 
 const KanbanIconButton = styled.button`
@@ -518,12 +675,192 @@ const HeaderActions = styled.div`
   justify-content: space-between;
   align-items: center;
   margin-bottom: 14px;
+
+  @media (max-width: 768px) {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+`;
+
+const ProjectBar = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #f8fbff 0%, #f8fafc 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+
+  @media (max-width: 768px) {
+    padding: 10px;
+    gap: 10px;
+  }
+`;
+
+const ProjectActions = styled.div`
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+
+  @media (max-width: 768px) {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+`;
+
+const ProjectSelectorWrap = styled.div`
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+
+  @media (max-width: 768px) {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+  }
+`;
+
+const ProjectLabel = styled.span`
+  font-size: 11px;
+  font-weight: 700;
+  color: #2563eb;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+`;
+
+const ProjectSelectShell = styled.div`
+  position: relative;
+  min-width: 260px;
+
+  @media (max-width: 768px) {
+    width: 100%;
+    min-width: 0;
+  }
+`;
+
+const ProjectSelectTrigger = styled.button`
+  width: 100%;
+  border: 1px solid ${(props) => (props.$open ? '#60a5fa' : '#bfdbfe')};
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #0f172a;
+  background: #fff;
+  cursor: pointer;
+  box-shadow: ${(props) =>
+    props.$open ? '0 0 0 4px rgba(59, 130, 246, 0.14)' : '0 1px 2px rgba(15, 23, 42, 0.06)'};
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  transition: all 0.18s ease;
+
+  .value {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .icon {
+    color: #64748b;
+    transform: ${(props) => (props.$open ? 'rotate(180deg)' : 'rotate(0deg)')};
+    transition: transform 0.16s ease;
+    flex-shrink: 0;
+  }
+
+  &:hover {
+    border-color: #93c5fd;
+    box-shadow: 0 2px 6px rgba(30, 64, 175, 0.1);
+  }
+
+  @media (max-width: 768px) {
+    font-size: 13px;
+  }
+`;
+
+const ProjectDropdownMenu = styled.div`
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  z-index: 25;
+  background: #fff;
+  border: 1px solid #bfdbfe;
+  border-radius: 12px;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.16);
+  padding: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+`;
+
+const ProjectDropdownItem = styled.button`
+  width: 100%;
+  border: none;
+  background: ${(props) => (props.$active ? '#dbeafe' : 'transparent')};
+  color: ${(props) => (props.$active ? '#1d4ed8' : '#0f172a')};
+  border-radius: 8px;
+  padding: 10px 10px;
+  font-size: 13px;
+  font-weight: ${(props) => (props.$active ? 700 : 600)};
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+
+  &:hover {
+    background: ${(props) => (props.$active ? '#dbeafe' : '#f1f5f9')};
+  }
+`;
+
+const CreateProjectButton = styled.button`
+  border: 1px solid #93c5fd;
+  background: linear-gradient(135deg, #ffffff 0%, #eff6ff 100%);
+  color: #1e3a8a;
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.12);
+
+  &:hover {
+    border-color: #60a5fa;
+    color: #1d4ed8;
+    background: linear-gradient(135deg, #ffffff 0%, #dbeafe 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 10px rgba(37, 99, 235, 0.2);
+  }
+
+  @media (max-width: 768px) {
+    width: 100%;
+    justify-content: center;
+  }
 `;
 
 const HeaderLeft = styled.div`
   display: flex;
   align-items: center;
   gap: 12px;
+
+  @media (max-width: 768px) {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
 `;
 
 const ViewSwitch = styled.div`
@@ -534,6 +871,11 @@ const ViewSwitch = styled.div`
   border: 1px solid #e2e8f0;
   border-radius: 12px;
   background: #f8fafc;
+
+  @media (max-width: 768px) {
+    width: 100%;
+    justify-content: space-between;
+  }
 `;
 
 const ViewSwitchButton = styled.button`
@@ -549,6 +891,11 @@ const ViewSwitchButton = styled.button`
   gap: 6px;
   cursor: pointer;
   box-shadow: ${(props) => (props.active ? '0 1px 4px rgba(15,23,42,0.08)' : 'none')};
+
+  @media (max-width: 768px) {
+    flex: 1;
+    justify-content: center;
+  }
 `;
 
 const CalendarShell = styled.div`
@@ -572,32 +919,117 @@ const PageTitle = styled.h2`
   font-weight: 700;
   color: #0f172a;
   margin: 0;
+
+  @media (max-width: 768px) {
+    font-size: 16px;
+  }
 `;
 
 const AddTaskButton = styled.button`
-  background: linear-gradient(135deg, #3b82f6, #2563eb);
-  color: white;
-  border: none;
-  padding: 10px 16px;
+  border: 1px solid #bfdbfe;
+  background: linear-gradient(135deg, #ffffff 0%, #eff6ff 100%);
+  color: #1e40af;
+  padding: 9px 12px;
   border-radius: 9px;
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 700;
   cursor: pointer;
   transition: all 0.2s ease;
   display: flex;
   align-items: center;
-  gap: 8px;
-  box-shadow: 0 2px 6px rgba(59, 130, 246, 0.18);
+  justify-content: center;
+  gap: 7px;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.12);
 
   &:hover {
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+    border-color: #60a5fa;
+    color: #1d4ed8;
+    background: linear-gradient(135deg, #ffffff 0%, #dbeafe 100%);
+    box-shadow: 0 4px 10px rgba(37, 99, 235, 0.2);
   }
-  
-  &::before {
-    content: '+';
-    font-size: 16px;
-    font-weight: 300;
+
+  &:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+  }
+
+  @media (max-width: 768px) {
+    width: 100%;
+  }
+`;
+
+const ColumnQuickAddWrap = styled.div`
+  margin-top: 8px;
+`;
+
+const ColumnQuickAddTrigger = styled.button`
+  width: 100%;
+  border: 1px dashed #cbd5e1;
+  background: #fff;
+  color: #475569;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s ease;
+
+  &:hover {
+    border-color: #93c5fd;
+    color: #1d4ed8;
+    background: #eff6ff;
+  }
+`;
+
+const ColumnQuickAddForm = styled.form`
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: #fff;
+  border: 1px solid #dbeafe;
+  border-radius: 9px;
+  padding: 9px;
+`;
+
+const ColumnQuickAddInput = styled.input`
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  padding: 8px 9px;
+  font-size: 12px;
+  color: #0f172a;
+
+  &:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+  }
+`;
+
+const ColumnQuickAddActions = styled.div`
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+`;
+
+const ColumnQuickAddAction = styled.button`
+  border: none;
+  border-radius: 7px;
+  padding: 6px 9px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  background: ${(p) => (p.$primary ? '#2563eb' : '#f1f5f9')};
+  color: ${(p) => (p.$primary ? '#fff' : '#334155')};
+
+  &:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
   }
 `;
 
@@ -834,6 +1266,10 @@ const Modal = styled.div`
   justify-content: center;
   z-index: 1000;
   padding: 20px;
+
+  @media (max-width: 768px) {
+    padding: 10px;
+  }
 `;
 
 const ModalContent = styled.div`
@@ -846,6 +1282,12 @@ const ModalContent = styled.div`
   overflow-y: auto;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
   position: relative;
+
+  @media (max-width: 768px) {
+    border-radius: 14px;
+    padding: 16px;
+    max-height: 92vh;
+  }
 `;
 
 const ModalHeader = styled.div`
@@ -860,6 +1302,15 @@ const ModalHeader = styled.div`
     color: #0f172a;
     margin: 0;
     letter-spacing: -0.5px;
+  }
+
+  @media (max-width: 768px) {
+    margin-bottom: 16px;
+
+    h2 {
+      font-size: 20px;
+      letter-spacing: -0.2px;
+    }
   }
 `;
 
@@ -888,6 +1339,10 @@ const ModalForm = styled.form`
   display: flex;
   flex-direction: column;
   gap: 24px;
+
+  @media (max-width: 768px) {
+    gap: 14px;
+  }
 `;
 
 const FormGroup = styled.div`
@@ -947,10 +1402,11 @@ const FormGroup = styled.div`
 const RichTextContainer = styled.div`
   border: 2px solid #e2e8f0;
   border-radius: 14px;
-  overflow: hidden;
+  overflow: visible;
   transition: all 0.2s ease;
   background: white;
   position: relative;
+  z-index: 1;
   
   &:focus-within {
     border-color: #3b82f6;
@@ -962,21 +1418,56 @@ const RichTextContainer = styled.div`
     border-bottom: 2px solid #e2e8f0;
     background: #fafbfc;
     padding: 12px 16px;
+    border-radius: 12px 12px 0 0;
   }
   
   .ql-container {
     border: none;
     font-size: 14px;
+    border-radius: 0 0 12px 12px;
   }
   
   .ql-editor {
     min-height: 150px;
+    max-height: min(320px, 40vh);
+    overflow-y: auto;
     padding: 16px;
     
     &.ql-blank::before {
       color: #94a3b8;
       font-style: normal;
     }
+  }
+
+  .ql-snow .ql-picker.ql-expanded .ql-picker-options {
+    z-index: 10050;
+  }
+`;
+
+const AddDescriptionTextarea = styled.textarea`
+  width: 100%;
+  box-sizing: border-box;
+  padding: 14px 16px;
+  border: 2px solid #e2e8f0;
+  border-radius: 14px;
+  font-size: 14px;
+  line-height: 1.55;
+  min-height: 140px;
+  resize: vertical;
+  font-family: inherit;
+  background: #fafbfc;
+  color: #0f172a;
+  transition: all 0.2s ease;
+
+  &:focus {
+    outline: none;
+    border-color: #3b82f6;
+    background: #fff;
+    box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
+  }
+
+  &::placeholder {
+    color: #94a3b8;
   }
 `;
 
@@ -1072,6 +1563,13 @@ const PrioritySection = styled.div`
   background: #fafbfc;
   border-radius: 14px;
   border: 2px solid #e8ecf0;
+
+  @media (max-width: 768px) {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    padding: 12px;
+  }
 `;
 
 const PriorityLabel = styled.label`
@@ -1085,6 +1583,12 @@ const PriorityButtons = styled.div`
   display: flex;
   gap: 12px;
   flex: 1;
+
+  @media (max-width: 768px) {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
 `;
 
 const PriorityButton = styled.button`
@@ -1119,6 +1623,13 @@ const StatusSection = styled.div`
   background: #fafbfc;
   border-radius: 14px;
   border: 2px solid #e8ecf0;
+
+  @media (max-width: 768px) {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    padding: 12px;
+  }
 `;
 
 const StatusLabel = styled.label`
@@ -1132,6 +1643,12 @@ const StatusButtons = styled.div`
   display: flex;
   gap: 12px;
   flex: 1;
+
+  @media (max-width: 768px) {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
 `;
 
 const StatusButton = styled.button`
@@ -1668,6 +2185,7 @@ const TaskManagement = () => {
   const [newTask, setNewTask] = useState('');
   const [newDescription, setNewDescription] = useState('');
   const [newPriority, setNewPriority] = useState('medium');
+  const [newDueDate, setNewDueDate] = useState('');
   const [filter, setFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -1676,7 +2194,13 @@ const TaskManagement = () => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showImageModal, setShowImageModal] = useState(false);
   const [selectedTask, setSelectedTask] = useState(null);
-  const [editForm, setEditForm] = useState({ title: '', description: '', priority: 'medium', status: 'pending' });
+  const [editForm, setEditForm] = useState({
+    title: '',
+    description: '',
+    priority: 'medium',
+    status: 'pending',
+    dueDate: '',
+  });
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [taskToDelete, setTaskToDelete] = useState(null);
@@ -1688,9 +2212,20 @@ const TaskManagement = () => {
   const [isAssigning, setIsAssigning] = useState(false);
   const [userSearchQuery, setUserSearchQuery] = useState('');
   const [activeView, setActiveView] = useState('kanban');
+  const [kanbanColumns, setKanbanColumns] = useState(() =>
+    normalizeKanbanColumns(DEFAULT_KANBAN_COLUMNS)
+  );
   const [meetings, setMeetings] = useState([]);
   const [showMeetingModal, setShowMeetingModal] = useState(false);
   const [editingMeetingId, setEditingMeetingId] = useState(null);
+  const [inlineAddByColumn, setInlineAddByColumn] = useState({});
+  const [inlineAddingColumn, setInlineAddingColumn] = useState('');
+  const [projects, setProjects] = useState([]);
+  const [selectedProjectId, setSelectedProjectId] = useState('');
+  const [isProjectDropdownOpen, setIsProjectDropdownOpen] = useState(false);
+  const [showProjectModal, setShowProjectModal] = useState(false);
+  const [projectForm, setProjectForm] = useState({ name: '', description: '' });
+  const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [meetingForm, setMeetingForm] = useState({
     title: '',
     start: '',
@@ -1699,6 +2234,11 @@ const TaskManagement = () => {
     notes: '',
     allDay: false,
   });
+
+  const selectedProject = useMemo(
+    () => projects.find((p) => p.id === selectedProjectId) || null,
+    [projects, selectedProjectId]
+  );
 
   // Permission checking helper
   const hasPermission = (permission) => {
@@ -1718,43 +2258,14 @@ const TaskManagement = () => {
   const canDelete = hasPermission('tasks.delete');
   const canAssign = hasPermission('tasks.assign');
 
-  const addQuillRef = useRef(null);
   const editQuillRef = useRef(null);
+  const projectDropdownRef = useRef(null);
 
   const formats = [
     'header', 'bold', 'italic', 'underline', 'strike',
     'list', 'bullet', 'color', 'background',
     'link', 'image'
   ];
-
-  const addImageHandler = useCallback(() => {
-    const input = document.createElement('input');
-    input.setAttribute('type', 'file');
-    input.setAttribute('accept', 'image/*');
-    input.click();
-
-    input.onchange = () => {
-      const file = input.files[0];
-      if (file) {
-        setIsUploadingImage(true);
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          const quill = addQuillRef.current?.getEditor();
-          const range = quill?.getSelection();
-          if (range) {
-            quill.insertEmbed(range.index, 'image', e.target.result);
-            quill.setSelection(range.index + 1);
-          }
-          setIsUploadingImage(false);
-        };
-        reader.onerror = () => {
-          setIsUploadingImage(false);
-          toast.error('Failed to load image');
-        };
-        reader.readAsDataURL(file);
-      }
-    };
-  }, []);
 
   const editImageHandler = useCallback(() => {
     const input = document.createElement('input');
@@ -1785,22 +2296,6 @@ const TaskManagement = () => {
     };
   }, []);
 
-  const addModules = useMemo(() => ({
-    toolbar: {
-      container: [
-        [{ 'header': [1, 2, 3, false] }],
-        ['bold', 'italic', 'underline', 'strike'],
-        [{ 'list': 'ordered'}, { 'list': 'bullet' }],
-        [{ 'color': [] }, { 'background': [] }],
-        ['link', 'image'],
-        ['clean']
-      ],
-      handlers: {
-        image: addImageHandler
-      }
-    }
-  }), [addImageHandler]);
-
   const editModules = useMemo(() => ({
     toolbar: {
       container: [
@@ -1819,6 +2314,25 @@ const TaskManagement = () => {
 
   // Tasks are now loaded and updated in real-time via TasksContext
   // No need to fetch on mount - context handles it
+
+  useEffect(() => {
+    const db = getDb();
+    const ref = doc(db, 'appConfig', 'kanban');
+    const unsub = onSnapshot(
+      ref,
+      (snap) => {
+        if (!snap.exists()) {
+          setKanbanColumns(normalizeKanbanColumns(DEFAULT_KANBAN_COLUMNS));
+          return;
+        }
+        setKanbanColumns(normalizeKanbanColumns(snap.data().columns));
+      },
+      () => {
+        setKanbanColumns(normalizeKanbanColumns(DEFAULT_KANBAN_COLUMNS));
+      }
+    );
+    return () => unsub();
+  }, []);
 
   useEffect(() => {
     if (!ownerId) return undefined;
@@ -1857,6 +2371,55 @@ const TaskManagement = () => {
     }
   }, [showAssignModal, canAssign]);
 
+  const fetchProjects = useCallback(async () => {
+    try {
+      const response = await projectsAPI.listProjects();
+      const list = response.data.projects || [];
+      setProjects(list);
+    } catch (error) {
+      console.error('Failed to load projects:', error);
+      toast.error('Failed to load projects');
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchProjects();
+  }, [fetchProjects]);
+
+  useEffect(() => {
+    if (projects.length === 0) {
+      setSelectedProjectId('');
+      return;
+    }
+    if (selectedProjectId && projects.some((p) => p.id === selectedProjectId)) return;
+    const remembered = window.localStorage.getItem('selectedProjectId');
+    const rememberedExists = remembered && projects.some((p) => p.id === remembered);
+    setSelectedProjectId(rememberedExists ? remembered : projects[0].id);
+  }, [projects, selectedProjectId]);
+
+  useEffect(() => {
+    if (!selectedProjectId) return;
+    window.localStorage.setItem('selectedProjectId', selectedProjectId);
+  }, [selectedProjectId]);
+
+  useEffect(() => {
+    const onPointerDown = (event) => {
+      if (!projectDropdownRef.current) return;
+      if (!projectDropdownRef.current.contains(event.target)) {
+        setIsProjectDropdownOpen(false);
+      }
+    };
+    const onEscape = (event) => {
+      if (event.key === 'Escape') setIsProjectDropdownOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onEscape);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onEscape);
+    };
+  }, []);
+
   const fetchUsers = async () => {
     try {
       const response = await adminAPI.listUsers();
@@ -1864,6 +2427,31 @@ const TaskManagement = () => {
     } catch (error) {
       console.error('Failed to load users:', error);
       toast.error('Failed to load users');
+    }
+  };
+
+  const createProject = async (e) => {
+    e.preventDefault();
+    if (isCreatingProject) return;
+    const name = projectForm.name.trim();
+    if (!name) return;
+    try {
+      setIsCreatingProject(true);
+      const response = await projectsAPI.createProject({
+        name,
+        description: projectForm.description.trim(),
+      });
+      const created = response.data.project;
+      setProjects((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
+      setSelectedProjectId(created.id);
+      setShowProjectModal(false);
+      setProjectForm({ name: '', description: '' });
+      toast.success('Project created');
+    } catch (error) {
+      console.error('Failed to create project:', error);
+      toast.error(error.response?.data?.message || 'Failed to create project');
+    } finally {
+      setIsCreatingProject(false);
     }
   };
 
@@ -1884,32 +2472,59 @@ const TaskManagement = () => {
     return filtered;
   };
 
-  const getStats = () => {
-    const total = tasks.length;
-    const completed = tasks.filter(t => t.status === 'completed').length;
-    const pending = tasks.filter(t => t.status === 'pending').length;
-    const inProgress = tasks.filter(t => t.status === 'in-progress').length;
-    return { total, completed, pending, inProgress };
+  const columnConfigs = useMemo(() => {
+    const base = kanbanColumns.map((c) => ({
+      status: c.id,
+      title: c.label,
+      color: c.color,
+      emptyText: `No tasks in ${c.label}`,
+      isDone: c.isDone,
+    }));
+    const ids = new Set(base.map((c) => c.status));
+    const orphanStatuses = [...new Set(tasks.map((t) => t.status))].filter((s) => !ids.has(s));
+    const orphans = orphanStatuses.map((s) => ({
+      status: s,
+      title: `Other (${s})`,
+      color: '#94a3b8',
+      emptyText: 'No tasks',
+      isDone: false,
+    }));
+    return [...base, ...orphans];
+  }, [kanbanColumns, tasks]);
+
+  const getStats = (taskList) => {
+    const total = taskList.length;
+    const byColumn = {};
+    columnConfigs.forEach((c) => {
+      byColumn[c.status] = taskList.filter((t) => t.status === c.status).length;
+    });
+    return { total, byColumn };
   };
 
   const addTask = async (e) => {
     e.preventDefault();
     if (isCreatingTask) return;
     if (newTask.trim() === '') return;
+    if (!selectedProjectId) {
+      toast.error('Create/select a project first');
+      return;
+    }
 
     try {
       setIsCreatingTask(true);
       const response = await tasksAPI.createTask({
         title: newTask.trim(),
-        description: newDescription,
-        status: 'pending',
-        priority: newPriority
+        description: plainTextToSafeDescriptionHtml(newDescription),
+        priority: newPriority,
+        dueDate: newDueDate || null,
+        projectId: selectedProjectId,
       });
       
       setTasks([...tasks, response.data]);
       setNewTask('');
       setNewDescription('');
       setNewPriority('medium');
+      setNewDueDate('');
       setShowAddModal(false);
       toast.success('Task added successfully!');
     } catch (error) {
@@ -1920,10 +2535,64 @@ const TaskManagement = () => {
     }
   };
 
+  const openInlineAdd = (columnStatus) => {
+    setInlineAddByColumn((prev) => ({ ...prev, [columnStatus]: '' }));
+  };
+
+  const cancelInlineAdd = (columnStatus) => {
+    if (inlineAddingColumn === columnStatus) return;
+    setInlineAddByColumn((prev) => {
+      const next = { ...prev };
+      delete next[columnStatus];
+      return next;
+    });
+  };
+
+  const updateInlineAddValue = (columnStatus, value) => {
+    setInlineAddByColumn((prev) => ({ ...prev, [columnStatus]: value }));
+  };
+
+  const submitInlineAdd = async (event, columnStatus) => {
+    event.preventDefault();
+    if (inlineAddingColumn || isCreatingTask) return;
+    const title = (inlineAddByColumn[columnStatus] || '').trim();
+    if (!title) return;
+    if (!selectedProjectId) {
+      toast.error('Create/select a project first');
+      return;
+    }
+    try {
+      setInlineAddingColumn(columnStatus);
+      const response = await tasksAPI.createTask({
+        title,
+        description: '',
+        priority: 'medium',
+        status: columnStatus,
+        projectId: selectedProjectId,
+      });
+      setTasks([...tasks, response.data]);
+      setInlineAddByColumn((prev) => {
+        const next = { ...prev };
+        delete next[columnStatus];
+        return next;
+      });
+      toast.success('Task added');
+    } catch (error) {
+      console.error('Error adding quick task:', error);
+      toast.error(error.response?.data?.message || 'Failed to add task');
+    } finally {
+      setInlineAddingColumn('');
+    }
+  };
+
   const toggleTask = async (taskId) => {
     try {
       const task = tasks.find(t => t._id === taskId);
-      const newStatus = task.status === 'completed' ? 'pending' : 'completed';
+      const doneCol = columnConfigs.find((c) => c.isDone);
+      const doneId = doneCol?.status || 'completed';
+      const firstNonDone = columnConfigs.find((c) => !c.isDone);
+      const reopenId = firstNonDone?.status || columnConfigs[0]?.status || 'pending';
+      const newStatus = task.status === doneId ? reopenId : doneId;
       
       const response = await tasksAPI.updateTask(taskId, { status: newStatus });
       
@@ -1931,7 +2600,9 @@ const TaskManagement = () => {
         t._id === taskId ? response.data : t
       ));
       
-      toast.success(`Task ${newStatus === 'completed' ? 'completed' : 'reopened'}`);
+      toast.success(
+        newStatus === doneId ? 'Task marked complete' : 'Task reopened'
+      );
     } catch (error) {
       toast.error('Failed to update task');
     }
@@ -1959,13 +2630,8 @@ const TaskManagement = () => {
       setSelectedTask(prev => (prev?._id === taskId ? updatedTask : prev));
       setEditingTask(prev => (prev?._id === taskId ? updatedTask : prev));
 
-      const statusMessages = {
-        pending: 'Task moved to pending',
-        'in-progress': 'Task marked as in progress',
-        completed: 'Task marked as completed'
-      };
-
-      toast.success(statusMessages[status] || 'Task status updated');
+      const label = columnConfigs.find((c) => c.status === status)?.title;
+      toast.success(label ? `Moved to ${label}` : 'Task status updated');
     } catch (error) {
       // Revert optimistic update on failure
       setTasks(previousTasks);
@@ -1986,32 +2652,58 @@ const TaskManagement = () => {
     updateTaskStatus(draggableId, destination.droppableId);
   };
 
-  const renderTaskActions = (columnStatus, task) => (
+  const renderTaskActions = (columnStatus, task) => {
+    const doneCol = columnConfigs.find((c) => c.isDone);
+    const doneId = doneCol?.status;
+    const firstNonDone = columnConfigs.find((c) => !c.isDone);
+    const idx = columnConfigs.findIndex((c) => c.status === columnStatus);
+    const nextCol = idx >= 0 ? columnConfigs[idx + 1] : null;
+    return (
     <KanbanTaskActions>
       {canUpdate && (
         <>
-          {columnStatus === 'pending' && (
+          <MoveStatusSelect
+            value=""
+            aria-label="Move task"
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => {
+              e.stopPropagation();
+              const v = e.target.value;
+              if (v) updateTaskStatus(task._id, v);
+              e.target.value = '';
+            }}
+          >
+            <option value="">Move to…</option>
+            {columnConfigs
+              .filter((c) => c.status !== task.status)
+              .map((c) => (
+                <option key={c.status} value={c.status}>
+                  {c.title}
+                </option>
+              ))}
+          </MoveStatusSelect>
+          {nextCol && (
             <KanbanIconButton
-              onClick={(e) => handleStatusChange(e, task, 'in-progress')}
-              title="Start task"
-              aria-label="Start task"
+              onClick={(e) => handleStatusChange(e, task, nextCol.status)}
+              title={`Move to ${nextCol.title}`}
+              aria-label={`Move to ${nextCol.title}`}
             >
               <PlayCircle />
             </KanbanIconButton>
           )}
-          {columnStatus !== 'completed' && (
+          {doneId && task.status !== doneId && (
             <KanbanIconButton
               completed
-              onClick={(e) => handleStatusChange(e, task, 'completed')}
-              title="Mark as completed"
-              aria-label="Mark as completed"
+              onClick={(e) => handleStatusChange(e, task, doneId)}
+              title="Mark complete"
+              aria-label="Mark complete"
             >
               <CheckCircle2 />
             </KanbanIconButton>
           )}
-          {columnStatus === 'completed' && (
+          {doneId && task.status === doneId && firstNonDone && (
             <KanbanIconButton
-              onClick={(e) => handleStatusChange(e, task, 'in-progress')}
+              onClick={(e) => handleStatusChange(e, task, firstNonDone.status)}
               title="Reopen task"
               aria-label="Reopen task"
             >
@@ -2059,7 +2751,8 @@ const TaskManagement = () => {
         </KanbanIconButton>
       )}
     </KanbanTaskActions>
-  );
+    );
+  };
 
   const deleteTask = async () => {
     if (!taskToDelete || isDeleting) return;
@@ -2179,13 +2872,14 @@ const TaskManagement = () => {
       title: task.title,
       description: task.description || '',
       priority: task.priority,
-      status: task.status
+      status: task.status,
+      dueDate: toDateInputValue(task.dueDate),
     });
   };
 
   const closeEditModal = () => {
     setEditingTask(null);
-    setEditForm({ title: '', description: '', priority: 'medium', status: 'pending' });
+    setEditForm({ title: '', description: '', priority: 'medium', status: 'pending', dueDate: '' });
   };
 
   const closeAddModal = () => {
@@ -2194,6 +2888,7 @@ const TaskManagement = () => {
     setNewTask('');
     setNewDescription('');
     setNewPriority('medium');
+    setNewDueDate('');
   };
 
   const stripImagesFromHTML = (html) => {
@@ -2222,7 +2917,11 @@ const TaskManagement = () => {
     if (!editForm.title.trim()) return;
 
     try {
-      const response = await tasksAPI.updateTask(editingTask._id, editForm);
+      const payload = {
+        ...editForm,
+        dueDate: editForm.dueDate || null,
+      };
+      const response = await tasksAPI.updateTask(editingTask._id, payload);
       setTasks(tasks.map(t => 
         t._id === editingTask._id ? response.data : t
       ));
@@ -2340,46 +3039,89 @@ const TaskManagement = () => {
     }
   };
 
-  const stats = getStats();
+  const projectTasks = useMemo(
+    () => tasks.filter((task) => task.projectId === selectedProjectId),
+    [tasks, selectedProjectId]
+  );
+  const stats = getStats(projectTasks);
   const priorityColors = {
     urgent: { bg: '#fef2f2', border: '#fecaca', text: '#991b1b' },
     high: { bg: '#fffbeb', border: '#fde68a', text: '#92400e' },
     medium: { bg: '#eff6ff', border: '#bfdbfe', text: '#1e40af' },
     low: { bg: '#f9fafb', border: '#e5e7eb', text: '#4b5563' }
   };
-  const columnConfigs = [
-    { status: 'pending', title: 'Pending', color: '#f59e0b', emptyText: 'No pending tasks' },
-    { status: 'in-progress', title: 'In Progress', color: '#3b82f6', emptyText: 'No in-progress tasks' },
-    { status: 'completed', title: 'Completed', color: '#10b981', emptyText: 'No completed tasks' }
-  ];
-  const visibleTasks = tasks.filter(task =>
+  const visibleTasks = projectTasks.filter(task =>
     !searchQuery || task.title.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   return (
     <Container>
       <ContentWrapper>
-        <StatsGrid>
-          <StatCard onClick={() => setFilter('all')}>
-            <div className="label">Total Tasks</div>
-            <div className="value">{stats.total}</div>
-          </StatCard>
-          <StatCard highlight="#10b981" onClick={() => setFilter('completed')}>
-            <div className="label">Completed</div>
-            <div className="value">{stats.completed}</div>
-            <div className="trend">{(tasks.length > 0 ? (stats.completed / tasks.length * 100).toFixed(0) : 0)}% done</div>
-          </StatCard>
-          <StatCard highlight="#3b82f6" onClick={() => setFilter('in-progress')}>
-            <div className="label">In Progress</div>
-            <div className="value">{stats.inProgress}</div>
-          </StatCard>
-          <StatCard highlight="#f59e0b" onClick={() => setFilter('pending')}>
-            <div className="label">Pending</div>
-            <div className="value">{stats.pending}</div>
-          </StatCard>
-        </StatsGrid>
-
         <MainContent>
+          <ProjectBar>
+            <ProjectSelectorWrap>
+              <ProjectLabel>
+                <FolderKanban size={13} style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
+                Project
+              </ProjectLabel>
+              <ProjectSelectShell ref={projectDropdownRef}>
+                <ProjectSelectTrigger
+                  type="button"
+                  $open={isProjectDropdownOpen}
+                  onClick={() => {
+                    if (projects.length === 0) return;
+                    setIsProjectDropdownOpen((prev) => !prev);
+                  }}
+                  disabled={projects.length === 0}
+                >
+                  <span className="value">
+                    {selectedProject ? selectedProject.name : 'No projects yet'}
+                  </span>
+                  <ChevronDown className="icon" size={16} />
+                </ProjectSelectTrigger>
+                {isProjectDropdownOpen && projects.length > 0 && (
+                  <ProjectDropdownMenu>
+                    {projects.map((project) => (
+                      <ProjectDropdownItem
+                        key={project.id}
+                        type="button"
+                        $active={selectedProjectId === project.id}
+                        onClick={() => {
+                          setSelectedProjectId(project.id);
+                          setIsProjectDropdownOpen(false);
+                        }}
+                      >
+                        <span>{project.name}</span>
+                        {selectedProjectId === project.id ? <Check size={14} /> : null}
+                      </ProjectDropdownItem>
+                    ))}
+                  </ProjectDropdownMenu>
+                )}
+              </ProjectSelectShell>
+            </ProjectSelectorWrap>
+            <ProjectActions>
+              <CreateProjectButton type="button" onClick={() => setShowProjectModal(true)}>
+                <FolderPlus size={14} />
+                New Project
+              </CreateProjectButton>
+              {canCreate && (
+                <AddTaskButton
+                  onClick={() => {
+                    if (!selectedProjectId) {
+                      toast.error('Create/select a project first');
+                      return;
+                    }
+                    setShowAddModal(true);
+                  }}
+                  disabled={!selectedProjectId}
+                  title={selectedProjectId ? 'Add task in this project' : 'Create/select a project first'}
+                >
+                  <Plus size={14} />
+                  {selectedProject ? `Add Task` : 'Add Task'}
+                </AddTaskButton>
+              )}
+            </ProjectActions>
+          </ProjectBar>
           <HeaderActions>
             <HeaderLeft>
               <PageTitle>My Tasks</PageTitle>
@@ -2402,22 +3144,26 @@ const TaskManagement = () => {
                 </ViewSwitchButton>
               </ViewSwitch>
             </HeaderLeft>
-            {canCreate && (
-              <AddTaskButton onClick={() => setShowAddModal(true)}>
-                Add New Task
-              </AddTaskButton>
-            )}
           </HeaderActions>
 
-          {activeView === 'kanban' ? (
+          {!selectedProjectId && (
+            <EmptyState style={{ marginBottom: 12, padding: '24px 16px' }}>
+              <h3>Create your first project</h3>
+              <p>Projects organize your Kanban boards and tasks. Start by creating one.</p>
+            </EmptyState>
+          )}
+
+          {tasksLoading ? (
+            <SectionLoader message="Loading project tasks" minHeight="360px" />
+          ) : selectedProjectId ? (activeView === 'kanban' ? (
             <DragDropContext onDragEnd={handleDragEnd}>
               <KanbanBoard>
                 {columnConfigs.map((column) => {
-                  const columnTasks = tasks.filter(task =>
+                  const columnTasks = projectTasks.filter(task =>
                     task.status === column.status &&
                     (!searchQuery || task.title.toLowerCase().includes(searchQuery.toLowerCase()))
                   );
-                  const totalInColumn = tasks.filter(task => task.status === column.status).length;
+                  const totalInColumn = projectTasks.filter(task => task.status === column.status).length;
                   return (
                     <KanbanColumn key={column.status}>
                       <ColumnHeader color={column.color}>
@@ -2432,7 +3178,7 @@ const TaskManagement = () => {
                             style={snapshot.isDraggingOver ? { background: '#eef2ff50' } : undefined}
                           >
                             {columnTasks.map((task, index) => {
-                              const isCompletedColumn = column.status === 'completed';
+                              const isCompletedColumn = column.isDone;
                               const descriptionHtml = task.description
                                 ? (isCompletedColumn ? task.description : stripImagesFromHTML(task.description))
                                 : null;
@@ -2454,6 +3200,18 @@ const TaskManagement = () => {
                                           <KanbanTaskPriorityBadge priority={task.priority}>
                                             {task.priority}
                                           </KanbanTaskPriorityBadge>
+                                        {task.dueDate ? (
+                                          (() => {
+                                            const variant = getDueVariant(task.dueDate) || 'upcoming';
+                                            const text =
+                                              variant === 'overdue'
+                                                ? 'Overdue'
+                                                : variant === 'today'
+                                                  ? 'Due today'
+                                                  : `Due ${formatDueLabel(task.dueDate)}`;
+                                            return <DueBadge $variant={variant}>{text}</DueBadge>;
+                                          })()
+                                        ) : null}
                                           {(task.assignees && task.assignees.length > 0) || task.user ? (
                                             <KanbanTaskAssignee>
                                               {(() => {
@@ -2507,6 +3265,50 @@ const TaskManagement = () => {
                           </ColumnTasks>
                         )}
                       </Droppable>
+                      {canCreate && (
+                        <ColumnQuickAddWrap>
+                          {Object.prototype.hasOwnProperty.call(inlineAddByColumn, column.status) ? (
+                            <ColumnQuickAddForm onSubmit={(e) => submitInlineAdd(e, column.status)}>
+                              <ColumnQuickAddInput
+                                type="text"
+                                value={inlineAddByColumn[column.status]}
+                                onChange={(e) => updateInlineAddValue(column.status, e.target.value)}
+                                placeholder={`Add task in ${column.title}...`}
+                                autoFocus
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Escape') cancelInlineAdd(column.status);
+                                }}
+                              />
+                              <ColumnQuickAddActions>
+                                <ColumnQuickAddAction
+                                  type="button"
+                                  onClick={() => cancelInlineAdd(column.status)}
+                                  disabled={inlineAddingColumn === column.status}
+                                >
+                                  Cancel
+                                </ColumnQuickAddAction>
+                                <ColumnQuickAddAction
+                                  type="submit"
+                                  $primary
+                                  disabled={
+                                    inlineAddingColumn === column.status ||
+                                    !String(inlineAddByColumn[column.status] || '').trim()
+                                  }
+                                >
+                                  {inlineAddingColumn === column.status ? 'Adding...' : 'Add'}
+                                </ColumnQuickAddAction>
+                              </ColumnQuickAddActions>
+                            </ColumnQuickAddForm>
+                          ) : (
+                            <ColumnQuickAddTrigger
+                              type="button"
+                              onClick={() => openInlineAdd(column.status)}
+                            >
+                              + Add task
+                            </ColumnQuickAddTrigger>
+                          )}
+                        </ColumnQuickAddWrap>
+                      )}
                     </KanbanColumn>
                   );
                 })}
@@ -2541,9 +3343,28 @@ const TaskManagement = () => {
                             : plainDescription}
                         </ListTaskSub>
                       ) : null}
+                      {task.dueDate ? (
+                        (() => {
+                          const variant = getDueVariant(task.dueDate) || 'upcoming';
+                          const text =
+                            variant === 'overdue'
+                              ? 'Overdue'
+                              : variant === 'today'
+                                ? 'Due today'
+                                : `Due ${formatDueLabel(task.dueDate)}`;
+                          return <DueBadge $variant={variant}>{text}</DueBadge>;
+                        })()
+                      ) : null}
                     </div>
                     <div>
-                      <StatusChip status={task.status}>{task.status.replace('-', ' ')}</StatusChip>
+                      <StatusChip
+                        style={{
+                          background: `${columnConfigs.find((c) => c.status === task.status)?.color || '#e2e8f0'}28`,
+                        }}
+                      >
+                        {columnConfigs.find((c) => c.status === task.status)?.title ||
+                          task.status.replace('-', ' ')}
+                      </StatusChip>
                     </div>
                     <div>
                       <KanbanTaskPriorityBadge priority={task.priority}>{task.priority}</KanbanTaskPriorityBadge>
@@ -2563,9 +3384,66 @@ const TaskManagement = () => {
                 </EmptyState>
               )}
             </ListViewShell>
-          )}
+          )) : null}
         </MainContent>
       </ContentWrapper>
+
+      {showProjectModal && (
+        <Modal onClick={() => !isCreatingProject && setShowProjectModal(false)}>
+          <ModalContent onClick={(e) => e.stopPropagation()} style={{ maxWidth: '520px' }}>
+            <ModalHeader>
+              <h2>Create Project</h2>
+              <CloseButton
+                onClick={() => {
+                  if (isCreatingProject) return;
+                  setShowProjectModal(false);
+                  setProjectForm({ name: '', description: '' });
+                }}
+              >
+                ×
+              </CloseButton>
+            </ModalHeader>
+            <ModalForm onSubmit={createProject}>
+              <FormGroup>
+                <label>Project name</label>
+                <input
+                  type="text"
+                  value={projectForm.name}
+                  onChange={(e) => setProjectForm((prev) => ({ ...prev, name: e.target.value }))}
+                  placeholder="e.g. Website Redesign"
+                  required
+                  autoFocus
+                />
+              </FormGroup>
+              <FormGroup>
+                <label>Description (optional)</label>
+                <textarea
+                  value={projectForm.description}
+                  onChange={(e) => setProjectForm((prev) => ({ ...prev, description: e.target.value }))}
+                  rows={4}
+                  placeholder="What is this project about?"
+                />
+              </FormGroup>
+              <ModalActions>
+                <ModalButton
+                  type="button"
+                  className="secondary"
+                  onClick={() => {
+                    if (isCreatingProject) return;
+                    setShowProjectModal(false);
+                    setProjectForm({ name: '', description: '' });
+                  }}
+                >
+                  Cancel
+                </ModalButton>
+                <ModalButton type="submit" className="primary" disabled={isCreatingProject}>
+                  {isCreatingProject ? 'Creating...' : 'Create Project'}
+                </ModalButton>
+              </ModalActions>
+            </ModalForm>
+          </ModalContent>
+        </Modal>
+      )}
 
       {showAddModal && (
         <Modal onClick={closeAddModal}>
@@ -2599,27 +3477,12 @@ const TaskManagement = () => {
               </FormGroup>
               <FormGroup>
                 <label>Description</label>
-                <RichTextContainer>
-                  <ReactQuill
-                    ref={addQuillRef}
-                    value={newDescription}
-                    onChange={setNewDescription}
-                    modules={addModules}
-                    formats={formats}
-                    placeholder="Add description with formatting, images, links..."
-                  />
-                  {isUploadingImage && (
-                    <ImageUploadOverlay>
-                      <LoadingContent>
-                        <LoaderSpinner />
-                        <LoaderText>
-                          <span>📷</span>
-                          Uploading image...
-                        </LoaderText>
-                      </LoadingContent>
-                    </ImageUploadOverlay>
-                  )}
-                </RichTextContainer>
+                <AddDescriptionTextarea
+                  value={newDescription}
+                  onChange={(e) => setNewDescription(e.target.value)}
+                  placeholder="Add details (plain text). You can use full formatting when you edit the task after it is created."
+                  rows={5}
+                />
               </FormGroup>
               <PrioritySection>
                 <PriorityLabel>Priority:</PriorityLabel>
@@ -2654,6 +3517,14 @@ const TaskManagement = () => {
                   </PriorityButton>
                 </PriorityButtons>
               </PrioritySection>
+              <FormGroup>
+                <label>Due date (optional)</label>
+                <input
+                  type="date"
+                  value={newDueDate}
+                  onChange={(e) => setNewDueDate(e.target.value)}
+                />
+              </FormGroup>
               <ModalActions>
                 <ModalButton
                   type="button"
@@ -2753,32 +3624,33 @@ const TaskManagement = () => {
               <StatusSection>
                 <StatusLabel>Status:</StatusLabel>
                 <StatusButtons>
-                  <StatusButton
-                    type="button"
-                    value="pending"
-                    active={editForm.status === 'pending'}
-                    onClick={() => setEditForm({ ...editForm, status: 'pending' })}
-                  >
-                    Pending
-                  </StatusButton>
-                  <StatusButton
-                    type="button"
-                    value="in-progress"
-                    active={editForm.status === 'in-progress'}
-                    onClick={() => setEditForm({ ...editForm, status: 'in-progress' })}
-                  >
-                    In Progress
-                  </StatusButton>
-                  <StatusButton
-                    type="button"
-                    value="completed"
-                    active={editForm.status === 'completed'}
-                    onClick={() => setEditForm({ ...editForm, status: 'completed' })}
-                  >
-                    Completed
-                  </StatusButton>
+                  {kanbanColumns.map((c) => (
+                    <StatusButton
+                      key={c.id}
+                      type="button"
+                      value={c.id}
+                      active={editForm.status === c.id}
+                      onClick={() => setEditForm({ ...editForm, status: c.id })}
+                    >
+                      {c.label}
+                    </StatusButton>
+                  ))}
+                  {editForm.status &&
+                    !kanbanColumns.some((c) => c.id === editForm.status) && (
+                      <StatusButton type="button" active>
+                        {editForm.status} (legacy)
+                      </StatusButton>
+                    )}
                 </StatusButtons>
               </StatusSection>
+              <FormGroup>
+                <label>Due date (optional)</label>
+                <input
+                  type="date"
+                  value={editForm.dueDate ? editForm.dueDate : ''}
+                  onChange={(e) => setEditForm({ ...editForm, dueDate: e.target.value })}
+                />
+              </FormGroup>
               <ModalActions>
                 <ModalButton type="button" className="secondary" onClick={closeEditModal}>
                   Cancel

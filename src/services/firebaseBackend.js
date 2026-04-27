@@ -25,7 +25,15 @@ export const AVAILABLE_PERMISSIONS = [
   'tasks.update',
   'tasks.delete',
   'tasks.assign',
+  'kanban.manage',
   'admin.access',
+];
+
+/** Default Kanban columns (ids are stored on tasks as `status`). */
+export const DEFAULT_KANBAN_COLUMNS = [
+  { id: 'pending', label: 'Pending', color: '#f59e0b', order: 0, isDone: false },
+  { id: 'in-progress', label: 'In Progress', color: '#3b82f6', order: 1, isDone: false },
+  { id: 'completed', label: 'Completed', color: '#10b981', order: 2, isDone: true },
 ];
 
 function apiError(message, status = 400) {
@@ -163,6 +171,78 @@ async function requireAdmin() {
   return u;
 }
 
+async function requireKanbanManage() {
+  const u = await requireAuth();
+  const db = getDb();
+  const snap = await getDoc(doc(db, 'users', u.uid));
+  const data = snap.data() || {};
+  if ((data.roles || []).includes('admin')) return u;
+  const teamsById = await loadTeamsById();
+  const perms = computePermissions(data, teamsById);
+  if (perms.includes('kanban.manage')) return u;
+  throw apiError('Forbidden', 403);
+}
+
+function slugifyKanbanId(raw) {
+  const s = String(raw || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9_-]/g, '');
+  return s || '';
+}
+
+export function normalizeKanbanColumns(input) {
+  const arr = Array.isArray(input) ? input : [];
+  const sorted = [...arr].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  const seen = new Set();
+  const out = [];
+  for (let i = 0; i < sorted.length; i += 1) {
+    const c = sorted[i];
+    let id = slugifyKanbanId(c.id);
+    if (!id) id = slugifyKanbanId(c.label) || `col-${out.length}`;
+    let n = 0;
+    let uid = id;
+    while (seen.has(uid)) {
+      n += 1;
+      uid = `${id}-${n}`;
+    }
+    seen.add(uid);
+    const label = String(c.label || uid).trim().slice(0, 80) || uid;
+    const color = /^#[0-9A-Fa-f]{6}$/.test(String(c.color || '').trim())
+      ? String(c.color).trim()
+      : '#64748b';
+    out.push({
+      id: uid,
+      label,
+      color,
+      order: out.length,
+      isDone: !!c.isDone,
+    });
+  }
+  if (out.length === 0) return DEFAULT_KANBAN_COLUMNS.map((x, i) => ({ ...x, order: i }));
+  const doneIdx = out.findIndex((c) => c.isDone);
+  const markIdx = doneIdx === -1 ? out.length - 1 : doneIdx;
+  out.forEach((c, i) => {
+    c.isDone = i === markIdx;
+  });
+  return out;
+}
+
+async function loadKanbanColumnsNormalized() {
+  const db = getDb();
+  const snap = await getDoc(doc(db, 'appConfig', 'kanban'));
+  if (!snap.exists()) return normalizeKanbanColumns(DEFAULT_KANBAN_COLUMNS);
+  return normalizeKanbanColumns(snap.data().columns);
+}
+
+function assertValidTaskStatus(status, columns) {
+  const ids = columns.map((c) => c.id);
+  if (!ids.includes(status)) {
+    throw apiError(`Invalid task status. Use one of: ${ids.join(', ')}`, 400);
+  }
+}
+
 async function hydrateTaskDoc(taskId, data) {
   const cache = {};
   const assigneeIds = data.assigneeIds || [];
@@ -178,6 +258,7 @@ async function hydrateTaskDoc(taskId, data) {
     status: data.status || 'pending',
     priority: data.priority || 'medium',
     dueDate: tsToIso(data.dueDate),
+    projectId: data.projectId || '',
     isArchived: !!data.isArchived,
     user: userMini,
     assignees,
@@ -208,6 +289,46 @@ async function fetchUserTasksMerged(uid) {
     byId[d.id] = d;
   });
   return Object.values(byId);
+}
+
+async function fetchUserProjectsMerged(uid) {
+  const db = getDb();
+  const col = collection(db, 'projects');
+  const q1 = query(col, where('ownerId', '==', uid));
+  const q2 = query(col, where('memberIds', 'array-contains', uid));
+  const [s1, s2] = await Promise.all([getDocs(q1), getDocs(q2)]);
+  const byId = {};
+  s1.forEach((d) => {
+    byId[d.id] = d;
+  });
+  s2.forEach((d) => {
+    byId[d.id] = d;
+  });
+  return Object.values(byId);
+}
+
+function projectDocToProject(id, data) {
+  return {
+    _id: id,
+    id,
+    name: data.name || 'Untitled Project',
+    description: data.description || '',
+    color: data.color || '#3b82f6',
+    ownerId: data.ownerId || '',
+    memberIds: data.memberIds || [],
+    createdAt: tsToIso(data.createdAt),
+    updatedAt: tsToIso(data.updatedAt),
+  };
+}
+
+async function ensureProjectAccess(projectId, uid) {
+  const db = getDb();
+  const psnap = await getDoc(doc(db, 'projects', projectId));
+  if (!psnap.exists()) throw apiError('Project not found', 404);
+  const pdata = psnap.data();
+  const hasAccess = pdata.ownerId === uid || (pdata.memberIds || []).includes(uid);
+  if (!hasAccess) throw apiError('Forbidden', 403);
+  return { id: psnap.id, data: pdata };
 }
 
 export const firebaseAuthApi = {
@@ -335,15 +456,23 @@ export const firebaseTasksApi = {
   async createTask(body) {
       const u = await requireAuth();
       const db = getDb();
+      if (!body.projectId) throw apiError('Project is required to create a task', 400);
+      await ensureProjectAccess(body.projectId, u.uid);
+      const columns = await loadKanbanColumnsNormalized();
+      const firstId = columns[0]?.id || 'pending';
+      const status =
+        body.status != null && body.status !== '' ? body.status : firstId;
+      assertValidTaskStatus(status, columns);
       const assignees = [...(body.assignees || [])];
       if (!assignees.includes(u.uid)) assignees.push(u.uid);
       const tref = doc(collection(db, 'tasks'));
       const payload = {
         title: body.title,
         description: body.description || '',
-        status: body.status || 'pending',
+        status,
         priority: body.priority || 'medium',
         dueDate: body.dueDate || null,
+        projectId: body.projectId,
         userId: u.uid,
         assigneeIds: assignees,
         isArchived: false,
@@ -374,6 +503,10 @@ export const firebaseTasksApi = {
         existing.userId === u.uid || (existing.assigneeIds || []).includes(u.uid);
       if (!ok) throw apiError('Forbidden', 403);
       const fields = {};
+      if (body.status !== undefined) {
+        const columns = await loadKanbanColumnsNormalized();
+        assertValidTaskStatus(body.status, columns);
+      }
       ['title', 'description', 'status', 'priority', 'dueDate'].forEach((k) => {
         if (body[k] !== undefined) fields[k] = body[k];
       });
@@ -447,6 +580,58 @@ export const firebaseTasksApi = {
       const next = await getDoc(tref);
       const task = await hydrateTaskDoc(taskId, next.data());
       return { data: { task, message: 'Updated' } };
+    },
+};
+
+export const firebaseKanbanApi = {
+  async getKanbanColumns() {
+    await requireAuth();
+    const columns = await loadKanbanColumnsNormalized();
+    return { data: { columns } };
+  },
+
+  async saveKanbanColumns(body) {
+    await requireKanbanManage();
+    const columns = normalizeKanbanColumns(body.columns);
+    const db = getDb();
+    await setDoc(doc(db, 'appConfig', 'kanban'), {
+      columns,
+      updatedAt: serverTimestamp(),
+    });
+    return { data: { columns } };
+  },
+};
+
+export const firebaseProjectsApi = {
+  async listProjects() {
+      const u = await requireAuth();
+      const docs = await fetchUserProjectsMerged(u.uid);
+      const projects = docs
+        .map((d) => projectDocToProject(d.id, d.data()))
+        .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+      return { data: { projects } };
+    },
+
+  async createProject(body) {
+      const u = await requireAuth();
+      const name = String(body?.name || '').trim();
+      if (!name) throw apiError('Project name is required', 400);
+      const db = getDb();
+      const pref = doc(collection(db, 'projects'));
+      const payload = {
+        name: name.slice(0, 80),
+        description: String(body?.description || '').trim(),
+        color: /^#[0-9A-Fa-f]{6}$/.test(String(body?.color || '').trim())
+          ? String(body.color).trim()
+          : '#3b82f6',
+        ownerId: u.uid,
+        memberIds: [u.uid],
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+      await setDoc(pref, payload);
+      const snap = await getDoc(pref);
+      return { data: { project: projectDocToProject(pref.id, snap.data()) } };
     },
 };
 
