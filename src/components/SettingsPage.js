@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import styled, { keyframes } from 'styled-components';
+import { KpiStripSkeleton, MemberListSkeleton, FieldRowsSkeleton, ItemListSkeleton } from './AppLoader';
 import { toast } from 'react-hot-toast';
 import {
   Users,
@@ -27,119 +28,112 @@ import { useAuth } from '../contexts/AuthContext';
 import { adminAPI, teamsAPI, kanbanAPI, DEFAULT_KANBAN_COLUMNS, normalizeKanbanColumns } from '../services/api';
 
 const PageWrapper = styled.div`
-  min-height: calc(100vh - 80px);
-  background: #f8fafc;
-  padding: 0;
-`;
+  min-height: 100%;
+  background: var(--wp-bg);
+  padding: 16px 20px 32px;
 
-const PageHeader = styled.header`
-  background: white;
-  border-bottom: 1px solid #e2e8f0;
-  padding: 24px 32px;
-
-  h1 {
-    font-size: 28px;
-    font-weight: 800;
-    color: #0f172a;
-    letter-spacing: -0.5px;
-    margin: 0 0 8px 0;
-  }
-
-  p {
-    font-size: 14px;
-    color: #64748b;
-    margin: 0;
-    line-height: 1.5;
+  @media (max-width: 768px) {
+    padding: 12px;
   }
 `;
 
 const SettingsLayout = styled.div`
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr);
   gap: 20px;
+  align-items: start;
   max-width: 1400px;
   margin: 0 auto;
-  padding: 20px 20px 0;
+
+  @media (max-width: 1024px) {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
 `;
 
 const SummaryGrid = styled.div`
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 20px;
-  margin-bottom: 36px;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
 `;
 
-const Sidebar = styled.section`
-  width: 100%;
-  background: white;
-  border: 1px solid #e2e8f0;
-  border-radius: 16px;
-  padding: 16px;
-  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.04);
+const Sidebar = styled.nav`
+  position: sticky;
+  top: 0;
+  background: var(--wp-surface);
+  border: 1px solid var(--wp-border);
+  border-radius: var(--wp-radius-lg);
+  padding: 8px;
+
+  @media (max-width: 1024px) {
+    position: static;
+  }
 `;
 
 const SidebarSearch = styled.div`
-  padding: 0 0 14px;
-  border-bottom: 1px solid #f1f5f9;
-  margin-bottom: 14px;
+  padding: 0 0 8px;
+  border-bottom: 1px solid var(--wp-border-subtle);
+  margin-bottom: 8px;
 `;
 
 const SidebarSearchInput = styled.input`
   width: 100%;
-  padding: 10px 14px;
-  border: 1.5px solid #e2e8f0;
-  border-radius: 10px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--wp-input-border);
+  border-radius: var(--wp-radius);
   font-size: 13px;
-  color: #0f172a;
-  background: #f8fafc;
-  transition: all 0.2s ease;
+  color: var(--wp-text);
+  background: var(--wp-input-bg);
 
   &:focus {
     outline: none;
-    border-color: #3b82f6;
-    background: white;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+    border-color: var(--wp-primary);
+    box-shadow: 0 0 0 3px var(--wp-focus-ring);
   }
 
   &::placeholder {
-    color: #94a3b8;
+    color: var(--wp-input-placeholder);
   }
 `;
 
 const SidebarTabsList = styled.div`
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
+  flex-direction: column;
+  gap: 1px;
+
+  @media (max-width: 1024px) {
+    flex-direction: row;
+    overflow-x: auto;
+  }
 `;
 
 const SidebarTabButton = styled.button`
+  position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 14px;
-  border-radius: 12px;
-  border: 1px solid ${({ active }) => (active ? '#bfdbfe' : '#e2e8f0')};
-  background: ${({ active }) =>
-    active ? 'linear-gradient(135deg, #eff6ff 0%, #e8f2ff 100%)' : '#ffffff'};
-  color: ${({ active }) => (active ? '#2563eb' : '#475569')};
+  height: 34px;
+  padding: 0 10px;
+  border: none;
+  border-radius: var(--wp-radius);
+  background: ${({ active }) => (active ? 'var(--wp-primary-muted)' : 'transparent')};
+  color: ${({ active }) => (active ? 'var(--wp-primary)' : 'var(--wp-text-muted)')};
   font-size: 13px;
   font-weight: ${({ active }) => (active ? '600' : '500')};
-  cursor: pointer;
-  transition: all 0.15s ease;
   text-align: left;
-  width: auto;
-  position: relative;
-  min-height: 42px;
+  white-space: nowrap;
+  cursor: pointer;
 
-  &:hover {
-    background: ${({ active }) =>
-      active ? 'linear-gradient(135deg, #eff6ff 0%, #e8f2ff 100%)' : '#f8fafc'};
-    color: ${({ active }) => (active ? '#2563eb' : '#1e40af')};
-    border-color: ${({ active }) => (active ? '#93c5fd' : '#cbd5e1')};
+  &:hover:not(:disabled) {
+    background: ${({ active }) => (active ? 'var(--wp-primary-muted)' : 'var(--wp-hover)')};
+    color: ${({ active }) => (active ? 'var(--wp-primary)' : 'var(--wp-text)')};
   }
 
-  &::before {
-    content: none;
+  &:disabled {
+    cursor: default;
+    opacity: 0.6;
   }
 
   svg {
@@ -148,9 +142,7 @@ const SidebarTabButton = styled.button`
 `;
 
 const ContentArea = styled.main`
-  flex: 1;
-  padding: 8px 0 32px;
-  overflow-y: auto;
+  min-width: 0;
   background: transparent;
 `;
 
@@ -158,9 +150,9 @@ const SearchResults = styled.div`
   display: ${({ visible }) => (visible ? 'flex' : 'none')};
   flex-direction: column;
   gap: 8px;
-  background: white;
-  border-radius: 12px;
-  border: 1px solid #e2e8f0;
+  background: var(--wp-surface);
+  border-radius: var(--wp-radius-lg);
+  border: 1px solid var(--wp-border);
   padding: 12px;
   margin-top: 8px;
   box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
@@ -177,38 +169,38 @@ const SearchResultItem = styled.button`
   text-align: left;
   cursor: pointer;
   padding: 10px 12px;
-  border-radius: 12px;
+  border-radius: var(--wp-radius-lg);
   transition: background 0.15s ease;
 
   &:hover {
-    background: #f1f5f9;
+    background: var(--wp-surface-2);
   }
 
   h4 {
     margin: 0 0 4px 0;
     font-size: 14px;
     font-weight: 700;
-    color: #0f172a;
+    color: var(--wp-text);
   }
 
   p {
     margin: 0;
     font-size: 12px;
-    color: #64748b;
+    color: var(--wp-text-muted);
     line-height: 1.5;
   }
 `;
 
 const SearchResultEmpty = styled.div`
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--wp-text-subtle);
   padding: 6px 4px;
   font-weight: 600;
 `;
 
 const ComingSoonTag = styled.span`
   background: rgba(59, 130, 246, 0.18);
-  color: #2563eb;
+  color: var(--wp-primary);
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.6px;
@@ -218,57 +210,53 @@ const ComingSoonTag = styled.span`
 `;
 
 const SummaryCard = styled.div`
-  background: white;
-  border-radius: 22px;
-  padding: 24px;
-  border: 1px solid #e2e8f0;
-  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.05);
+  background: var(--wp-surface);
+  border-radius: var(--wp-radius-lg);
+  padding: 14px 16px;
+  border: 1px solid var(--wp-border);
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: 12px;
 `;
 
 const CardIcon = styled.div`
-  width: 44px;
-  height: 44px;
-  border-radius: 14px;
-  background: ${({ bg }) => bg};
-  color: ${({ color }) => color};
+  width: 32px;
+  height: 32px;
+  border-radius: var(--wp-radius);
+  background: var(--wp-surface-2);
+  color: var(--wp-text-muted);
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
 `;
 
 const CardStat = styled.div`
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 
   span:first-child {
-    font-size: 14px;
-    font-weight: 600;
-    color: #64748b;
-    text-transform: uppercase;
-    letter-spacing: 0.4px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--wp-text-subtle);
   }
 
   span:last-child {
-    font-size: 30px;
-    font-weight: 800;
-    color: #0f172a;
-    letter-spacing: -0.8px;
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--wp-text);
   }
 `;
 
 const UsersSection = styled.section`
-  background: white;
-  border-radius: 24px;
-  border: 1px solid #e2e8f0;
-  box-shadow: 0 24px 48px rgba(15, 23, 42, 0.05);
-  padding: 28px 32px;
+  background: var(--wp-surface);
+  border-radius: var(--wp-radius-lg);
+  border: 1px solid var(--wp-border);
+  padding: 20px;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 16px;
 `;
 
 const UsersHeader = styled.div`
@@ -280,9 +268,9 @@ const UsersHeader = styled.div`
 
   h2 {
     margin: 0;
-    font-size: 20px;
-    font-weight: 700;
-    color: #0f172a;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--wp-text);
     display: flex;
     align-items: center;
     gap: 12px;
@@ -291,7 +279,7 @@ const UsersHeader = styled.div`
   p {
     margin: 0;
     font-size: 14px;
-    color: #64748b;
+    color: var(--wp-text-muted);
     max-width: 520px;
     line-height: 1.5;
   }
@@ -307,17 +295,17 @@ const UserRow = styled.div`
   display: grid;
   grid-template-columns: minmax(200px, 2fr) minmax(250px, 3fr) auto;
   gap: 20px;
-  background: white;
-  border-radius: 12px;
+  background: var(--wp-surface);
+  border-radius: var(--wp-radius-lg);
   padding: 20px 24px;
   align-items: center;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--wp-border);
   transition: all 0.2s ease;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  box-shadow: var(--wp-shadow-sm);
 
   &:hover {
-    border-color: #cbd5e1;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    border-color: var(--wp-border-strong);
+    box-shadow: var(--wp-shadow-sm);
   }
 
   @media (max-width: 900px) {
@@ -334,13 +322,13 @@ const UserIdentity = styled.div`
   strong {
     font-size: 16px;
     font-weight: 600;
-    color: #0f172a;
+    color: var(--wp-text);
     line-height: 1.4;
   }
 
   span {
     font-size: 13px;
-    color: #64748b;
+    color: var(--wp-text-muted);
     line-height: 1.4;
   }
 `;
@@ -372,13 +360,13 @@ const RoleToggleGroup = styled.div`
 `;
 
 const RoleToggle = styled.button`
-  border: 1.5px solid ${({ active }) => (active ? '#2563eb' : '#dbeafe')};
-  background: ${({ active }) => (active ? '#2563eb' : 'white')};
-  color: ${({ active }) => (active ? 'white' : '#2563eb')};
+  border: 1.5px solid ${({ active }) => (active ? 'var(--wp-primary)' : 'var(--wp-primary-muted)')};
+  background: ${({ active }) => (active ? 'var(--wp-primary)' : 'white')};
+  color: ${({ active }) => (active ? 'white' : 'var(--wp-primary)')};
   font-weight: 600;
   font-size: 12px;
   padding: 8px 14px;
-  border-radius: 12px;
+  border-radius: var(--wp-radius-lg);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -386,7 +374,7 @@ const RoleToggle = styled.button`
   transition: all 0.2s ease;
 
   &:hover {
-    background: ${({ active }) => (active ? '#1d4ed8' : '#eff6ff')};
+    background: ${({ active }) => (active ? 'var(--wp-primary-hover)' : 'var(--wp-primary-muted)')};
   }
 
   &:disabled {
@@ -401,16 +389,16 @@ const UpdateStatus = styled.div`
   gap: 6px;
   font-size: 12px;
   font-weight: 600;
-  color: ${({ success }) => (success ? '#059669' : '#94a3b8')};
+  color: ${({ success }) => (success ? 'var(--wp-success)' : 'var(--wp-text-subtle)')};
 `;
 
 const UserSearchBar = styled.div`
   display: flex;
   align-items: center;
   gap: 12px;
-  background: #f8fafc;
-  border-radius: 16px;
-  border: 1px solid #e2e8f0;
+  background: var(--wp-surface-2);
+  border-radius: var(--wp-radius-lg);
+  border: 1px solid var(--wp-border);
   padding: 12px 16px;
   max-width: 360px;
 
@@ -419,10 +407,10 @@ const UserSearchBar = styled.div`
     border: none;
     background: transparent;
     font-size: 13px;
-    color: #0f172a;
+    color: var(--wp-text);
 
     &::placeholder {
-      color: #94a3b8;
+      color: var(--wp-text-subtle);
     }
   }
 `;
@@ -430,29 +418,29 @@ const UserSearchBar = styled.div`
 const EmptyState = styled.div`
   padding: 48px;
   text-align: center;
-  border-radius: 20px;
-  border: 2px dashed #bfdbfe;
-  color: #64748b;
+  border-radius: var(--wp-radius-lg);
+  border: 2px dashed var(--wp-primary-border);
+  color: var(--wp-text-muted);
   font-size: 14px;
-  background: #f8fafc;
+  background: var(--wp-surface-2);
 `;
 
 const FilterEmptyState = styled.div`
   padding: 28px;
   text-align: center;
-  border-radius: 18px;
-  border: 1px dashed #dbeafe;
-  color: #64748b;
+  border-radius: var(--wp-radius-lg);
+  border: 1px dashed var(--wp-primary-border);
+  color: var(--wp-text-muted);
   font-size: 13px;
-  background: #f8fafc;
+  background: var(--wp-surface-2);
   font-weight: 500;
 `;
 
 const RestrictedState = styled.div`
   padding: 64px 32px;
-  background: white;
-  border-radius: 24px;
-  border: 1px solid #e2e8f0;
+  background: var(--wp-surface);
+  border-radius: var(--wp-radius-lg);
+  border: 1px solid var(--wp-border);
   box-shadow: 0 24px 48px rgba(15, 23, 42, 0.05);
   text-align: center;
   display: flex;
@@ -464,56 +452,45 @@ const RestrictedState = styled.div`
     margin: 0;
     font-size: 22px;
     font-weight: 700;
-    color: #0f172a;
+    color: var(--wp-text);
   }
 
   p {
     margin: 0;
     font-size: 14px;
-    color: #64748b;
+    color: var(--wp-text-muted);
     max-width: 460px;
     line-height: 1.6;
   }
 `;
 
 const PlaceholderCard = styled.div`
-  background: white;
-  border-radius: 24px;
-  border: 1px dashed #dbeafe;
+  background: var(--wp-surface);
+  border-radius: var(--wp-radius-lg);
+  border: 1px dashed var(--wp-primary-border);
   padding: 48px 32px;
   display: flex;
   flex-direction: column;
   gap: 12px;
   align-items: center;
   text-align: center;
-  color: #475569;
+  color: var(--wp-text-muted);
   box-shadow: 0 12px 32px rgba(59, 130, 246, 0.08);
 
   h3 {
     margin: 0;
     font-size: 18px;
     font-weight: 700;
-    color: #1e3a8a;
+    color: var(--wp-primary);
   }
 
   p {
     margin: 0;
     font-size: 14px;
-    color: #64748b;
+    color: var(--wp-text-muted);
     line-height: 1.6;
     max-width: 420px;
   }
-`;
-
-const LoadingWrapper = styled.div`
-  padding: 32px 0;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 10px;
-  font-size: 14px;
-  color: #64748b;
-  font-weight: 600;
 `;
 
 const spin = keyframes`
@@ -531,10 +508,10 @@ const CreateUserButton = styled.button`
   align-items: center;
   gap: 8px;
   padding: 10px 18px;
-  background: linear-gradient(135deg, #3b82f6, #2563eb);
-  color: white;
+  background: var(--wp-primary);
+  color: var(--wp-on-primary);
   border: none;
-  border-radius: 12px;
+  border-radius: var(--wp-radius-lg);
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
@@ -542,7 +519,6 @@ const CreateUserButton = styled.button`
   box-shadow: 0 2px 8px rgba(59, 130, 246, 0.2);
 
   &:hover {
-    transform: translateY(-1px);
     box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
   }
 
@@ -559,8 +535,7 @@ const ModalOverlay = styled.div`
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(4px);
+  background: var(--wp-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -569,14 +544,14 @@ const ModalOverlay = styled.div`
 `;
 
 const ModalContent = styled.div`
-  background: white;
-  border-radius: 24px;
+  background: var(--wp-surface);
+  border-radius: var(--wp-radius-lg);
   padding: 32px;
   max-width: 520px;
   width: 100%;
   max-height: 90vh;
   overflow-y: auto;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--wp-shadow-xl);
 `;
 
 const ModalHeader = styled.div`
@@ -588,7 +563,7 @@ const ModalHeader = styled.div`
   h2 {
     font-size: 24px;
     font-weight: 700;
-    color: #0f172a;
+    color: var(--wp-text);
     margin: 0;
     letter-spacing: -0.4px;
   }
@@ -597,7 +572,7 @@ const ModalHeader = styled.div`
 const CloseButton = styled.button`
   background: none;
   border: none;
-  color: #64748b;
+  color: var(--wp-text-muted);
   cursor: pointer;
   padding: 8px;
   border-radius: 8px;
@@ -607,8 +582,8 @@ const CloseButton = styled.button`
   transition: all 0.2s ease;
 
   &:hover {
-    background: #f1f5f9;
-    color: #0f172a;
+    background: var(--wp-surface-2);
+    color: var(--wp-text);
   }
 `;
 
@@ -625,31 +600,31 @@ const FormGroup = styled.div`
 
   label {
     font-weight: 600;
-    color: #334155;
+    color: var(--wp-text);
     font-size: 14px;
   }
 
   input,
   select {
     padding: 12px 16px;
-    border: 1px solid #bfdbfe;
-    border-radius: 12px;
+    border: 1px solid var(--wp-primary-border);
+    border-radius: var(--wp-radius-lg);
     font-size: 14px;
     transition: all 0.2s ease;
-    background: linear-gradient(135deg, #ffffff 0%, #eff6ff 100%);
-    color: #0f172a;
+    background: var(--wp-input-bg);
+    color: var(--wp-text);
     font-family: inherit;
     box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
 
     &:focus {
       outline: none;
-      border-color: #60a5fa;
-      background: white;
+      border-color: var(--wp-primary);
+      background: var(--wp-surface);
       box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.14);
     }
 
     &::placeholder {
-      color: #94a3b8;
+      color: var(--wp-text-subtle);
     }
   }
 
@@ -662,7 +637,7 @@ const FormGroup = styled.div`
     background-position: right 14px center;
 
     &:hover {
-      border-color: #93c5fd;
+      border-color: var(--wp-primary-border);
       box-shadow: 0 2px 6px rgba(30, 64, 175, 0.1);
     }
   }
@@ -683,9 +658,9 @@ const RoleCheckboxGroup = styled.div`
   flex-direction: column;
   gap: 12px;
   padding: 16px;
-  background: #f8fafc;
-  border-radius: 12px;
-  border: 2px solid #e2e8f0;
+  background: var(--wp-surface-2);
+  border-radius: var(--wp-radius-lg);
+  border: 2px solid var(--wp-border);
 `;
 
 const RoleCheckbox = styled.label`
@@ -698,26 +673,26 @@ const RoleCheckbox = styled.label`
   transition: background 0.2s ease;
 
   &:hover {
-    background: white;
+    background: var(--wp-surface);
   }
 
   input[type='checkbox'] {
     width: 18px;
     height: 18px;
     cursor: pointer;
-    accent-color: #3b82f6;
+    accent-color: var(--wp-primary);
   }
 
   span {
     font-size: 14px;
     font-weight: 500;
-    color: #334155;
+    color: var(--wp-text);
   }
 
   small {
     display: block;
     font-size: 12px;
-    color: #64748b;
+    color: var(--wp-text-muted);
     margin-top: 2px;
   }
 `;
@@ -728,12 +703,12 @@ const ModalActions = styled.div`
   justify-content: flex-end;
   margin-top: 8px;
   padding-top: 20px;
-  border-top: 2px solid #f1f5f9;
+  border-top: 2px solid var(--wp-surface-2);
 `;
 
 const ModalButton = styled.button`
   padding: 12px 24px;
-  border-radius: 12px;
+  border-radius: var(--wp-radius-lg);
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
@@ -741,22 +716,21 @@ const ModalButton = styled.button`
   border: none;
 
   &.primary {
-    background: linear-gradient(135deg, #3b82f6, #2563eb);
-    color: white;
+    background: var(--wp-primary);
+    color: var(--wp-on-primary);
     box-shadow: 0 2px 8px rgba(59, 130, 246, 0.2);
 
     &:hover:not(:disabled) {
-      transform: translateY(-1px);
       box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
     }
   }
 
   &.secondary {
-    background: #f1f5f9;
-    color: #334155;
+    background: var(--wp-surface-2);
+    color: var(--wp-text);
 
     &:hover {
-      background: #e2e8f0;
+      background: var(--wp-border);
     }
   }
 
@@ -767,12 +741,11 @@ const ModalButton = styled.button`
   }
 
   &.danger {
-    background: linear-gradient(135deg, #ef4444, #dc2626);
-    color: white;
+    background: var(--wp-error);
+    color: var(--wp-on-primary);
     box-shadow: 0 2px 8px rgba(239, 68, 68, 0.2);
 
     &:hover:not(:disabled) {
-      transform: translateY(-1px);
       box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
     }
   }
@@ -784,8 +757,7 @@ const ConfirmModal = styled.div`
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(4px);
+  background: var(--wp-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -794,12 +766,12 @@ const ConfirmModal = styled.div`
 `;
 
 const ConfirmModalContent = styled.div`
-  background: white;
-  border-radius: 20px;
+  background: var(--wp-surface);
+  border-radius: var(--wp-radius-lg);
   padding: 32px;
   max-width: 480px;
   width: 100%;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--wp-shadow-xl);
   position: relative;
   animation: slideIn 0.2s ease-out;
   
@@ -824,15 +796,15 @@ const ConfirmModalHeader = styled.div`
   .icon-wrapper {
     width: 56px;
     height: 56px;
-    border-radius: 14px;
-    background: #fef2f2;
+    border-radius: var(--wp-radius-lg);
+    background: var(--wp-error-bg);
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
     
     svg {
-      color: #ef4444;
+      color: var(--wp-error);
       width: 28px;
       height: 28px;
     }
@@ -841,7 +813,7 @@ const ConfirmModalHeader = styled.div`
   h3 {
     font-size: 22px;
     font-weight: 700;
-    color: #0f172a;
+    color: var(--wp-text);
     margin: 0;
     flex: 1;
   }
@@ -852,18 +824,18 @@ const ConfirmModalBody = styled.div`
   
   p {
     font-size: 15px;
-    color: #475569;
+    color: var(--wp-text-muted);
     line-height: 1.6;
     margin: 0 0 12px 0;
   }
   
   .item-name {
-    background: #f8fafc;
+    background: var(--wp-surface-2);
     padding: 12px 16px;
-    border-radius: 10px;
-    border: 1px solid #e2e8f0;
+    border-radius: var(--wp-radius-lg);
+    border: 1px solid var(--wp-border);
     font-weight: 600;
-    color: #0f172a;
+    color: var(--wp-text);
     font-size: 14px;
     margin-top: 12px;
   }
@@ -876,8 +848,8 @@ const ConfirmModalActions = styled.div`
 `;
 
 const rolePalette = {
-  admin: { bg: 'rgba(37, 99, 235, 0.12)', color: '#1d4ed8', icon: <Crown size={14} /> },
-  manager: { bg: 'rgba(16, 185, 129, 0.14)', color: '#047857', icon: <ClipboardList size={14} /> },
+  admin: { bg: 'rgba(37, 99, 235, 0.12)', color: 'var(--wp-primary-hover)', icon: <Crown size={14} /> },
+  manager: { bg: 'rgba(16, 185, 129, 0.14)', color: 'var(--wp-success)', icon: <ClipboardList size={14} /> },
   member: { bg: 'rgba(99, 102, 241, 0.1)', color: '#4338ca', icon: <Users size={14} /> },
 };
 
@@ -933,7 +905,7 @@ const SettingsPage = () => {
   const [newTeamForm, setNewTeamForm] = useState({
     name: '',
     description: '',
-    color: '#3b82f6',
+    color: 'var(--wp-primary)',
     icon: 'users',
     permissions: [],
   });
@@ -1359,7 +1331,7 @@ const SettingsPage = () => {
       setNewTeamForm({
         name: '',
         description: '',
-        color: '#3b82f6',
+        color: 'var(--wp-primary)',
         icon: 'users',
         permissions: [],
       });
@@ -1405,7 +1377,7 @@ const SettingsPage = () => {
     setNewTeamForm({
       name: team.name,
       description: team.description || '',
-      color: team.color || '#3b82f6',
+      color: team.color || 'var(--wp-primary)',
       icon: team.icon || 'users',
       permissions: team.permissions || [],
     });
@@ -1427,7 +1399,7 @@ const SettingsPage = () => {
     return (
       <PageWrapper>
         <RestrictedState>
-          <ShieldCheck size={42} color="#2563eb" />
+          <ShieldCheck size={42} color="var(--wp-primary)" />
           <h2>Restricted Access</h2>
           <p>
             You need administrator access or the Kanban management permission to open Settings. Contact an administrator
@@ -1442,22 +1414,17 @@ const SettingsPage = () => {
 
   return (
     <PageWrapper>
-      <PageHeader>
-        <h1>Settings</h1>
-        <p>Manage your workspace, users, teams, and permissions</p>
-      </PageHeader>
-
       <SettingsLayout>
         <Sidebar>
           <SidebarSearch>
             <div style={{ position: 'relative' }}>
-              <Search size={16} color="#94a3b8" style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
+              <Search size={14} color="var(--wp-text-subtle)" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
               <SidebarSearchInput
                 value={searchTerm}
                 placeholder="Search settings..."
                 onChange={(event) => setSearchTerm(event.target.value)}
                 onKeyDown={handleSearchKeyDown}
-                style={{ paddingLeft: '40px' }}
+                style={{ paddingLeft: '30px' }}
               />
               {searchTerm && (
                 <button
@@ -1469,7 +1436,7 @@ const SettingsPage = () => {
                     transform: 'translateY(-50%)',
                     border: 'none',
                     background: 'none',
-                    color: '#94a3b8',
+                    color: 'var(--wp-text-subtle)',
                     cursor: 'pointer',
                     fontSize: '12px',
                     fontWeight: 600,
@@ -1490,7 +1457,7 @@ const SettingsPage = () => {
                       type="button"
                       onClick={() => handleSearchResultSelect(match.id)}
                     >
-                      <Icon size={16} color="#2563eb" style={{ marginTop: 2 }} />
+                      <Icon size={16} color="var(--wp-primary)" style={{ marginTop: 2 }} />
                       <div>
                         <h4>{match.label}</h4>
                         <p>{match.description}</p>
@@ -1499,7 +1466,7 @@ const SettingsPage = () => {
                   );
                 })
               ) : searchTerm ? (
-                <div style={{ padding: '12px', color: '#64748b', fontSize: '13px', textAlign: 'center' }}>
+                <div style={{ padding: '12px', color: 'var(--wp-text-muted)', fontSize: '13px', textAlign: 'center' }}>
                   No settings matched "{searchTerm}"
                 </div>
               ) : null}
@@ -1517,10 +1484,10 @@ const SettingsPage = () => {
                   onClick={() => handleTabSelection(tab.id)}
                   disabled={tab.comingSoon}
                 >
-                  <Icon size={18} />
+                  <Icon size={16} />
                   <span style={{ flex: 1 }}>{tab.label}</span>
                   {tab.comingSoon && (
-                    <span style={{ fontSize: '10px', fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase' }}>
+                    <span style={{ fontSize: '10px', fontWeight: 600, color: 'var(--wp-text-subtle)', textTransform: 'uppercase' }}>
                       Soon
                     </span>
                   )}
@@ -1533,52 +1500,56 @@ const SettingsPage = () => {
         <ContentArea>
           {activeTab === 'roles' ? (
           <>
-            <div style={{ marginBottom: '24px' }}>
-              <h2 style={{ fontSize: '22px', fontWeight: 700, color: '#0f172a', margin: '0 0 8px 0' }}>
+            <div style={{ marginBottom: '16px' }}>
+              <h2 style={{ fontSize: '17px', fontWeight: 600, color: 'var(--wp-text)', margin: '0 0 4px 0' }}>
                 Users & Roles
               </h2>
-              <p style={{ fontSize: '14px', color: '#64748b', margin: 0 }}>
+              <p style={{ fontSize: '13px', color: 'var(--wp-text-muted)', margin: 0 }}>
                 Manage users and assign roles to control workspace access
               </p>
             </div>
+            {isLoadingUsers ? (
+              <KpiStripSkeleton count={3} min="200px" iconSize="32px" />
+            ) : (
             <SummaryGrid>
               <SummaryCard>
-                <CardIcon bg="rgba(37, 99, 235, 0.12)" color="#1d4ed8">
+                <CardIcon bg="rgba(37, 99, 235, 0.12)" color="var(--wp-primary-hover)">
                   <ShieldCheck size={20} />
                 </CardIcon>
                 <CardStat>
                   <span>Total Members</span>
                   <span>{roleStats.total}</span>
                 </CardStat>
-                <p style={{ margin: 0, fontSize: 13, color: '#64748b', lineHeight: 1.5 }}>
+                <p style={{ margin: 0, fontSize: 13, color: 'var(--wp-text-muted)', lineHeight: 1.5 }}>
                   Active collaborators with access to your task workspace.
                 </p>
               </SummaryCard>
               <SummaryCard>
-                <CardIcon bg="rgba(59, 130, 246, 0.12)" color="#2563eb">
+                <CardIcon bg="rgba(59, 130, 246, 0.12)" color="var(--wp-primary)">
                   <Crown size={20} />
                 </CardIcon>
                 <CardStat>
                   <span>Administrators</span>
                   <span>{roleStats.admins}</span>
                 </CardStat>
-                <p style={{ margin: 0, fontSize: 13, color: '#64748b', lineHeight: 1.5 }}>
+                <p style={{ margin: 0, fontSize: 13, color: 'var(--wp-text-muted)', lineHeight: 1.5 }}>
                   System-level guardians with full control over policies and data.
                 </p>
               </SummaryCard>
               <SummaryCard>
-                <CardIcon bg="rgba(16, 185, 129, 0.14)" color="#047857">
+                <CardIcon bg="rgba(16, 185, 129, 0.14)" color="var(--wp-success)">
                   <ClipboardList size={20} />
                 </CardIcon>
                 <CardStat>
                   <span>Managers</span>
                   <span>{roleStats.managers}</span>
                 </CardStat>
-                <p style={{ margin: 0, fontSize: 13, color: '#64748b', lineHeight: 1.5 }}>
+                <p style={{ margin: 0, fontSize: 13, color: 'var(--wp-text-muted)', lineHeight: 1.5 }}>
                   Team coordinators who fast-track work and approvals.
                 </p>
               </SummaryCard>
             </SummaryGrid>
+            )}
 
             <UsersSection>
               <UsersHeader>
@@ -1591,7 +1562,7 @@ const SettingsPage = () => {
                 </div>
                 <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
                   <UserSearchBar>
-                    <Search size={16} color="#2563eb" />
+                    <Search size={16} color="var(--wp-primary)" />
                     <input
                       value={userFilter}
                       onChange={(event) => setUserFilter(event.target.value)}
@@ -1617,10 +1588,7 @@ const SettingsPage = () => {
               </UsersHeader>
 
               {isLoadingUsers ? (
-                <LoadingWrapper>
-                  <Spinner size={18} />
-                  Fetching user directory...
-                </LoadingWrapper>
+                <MemberListSkeleton rows={5} label="Loading members" />
               ) : users.length === 0 ? (
                 <EmptyState>No members found yet. Invite teammates to collaborate on tasks.</EmptyState>
               ) : (
@@ -1659,13 +1627,13 @@ const SettingsPage = () => {
                               ))}
                             </RoleBadgeGroup>
                             {updatingUserId === account._id && (
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#64748b' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--wp-text-muted)' }}>
                                 <Spinner size={12} />
                                 <span>Updating...</span>
                               </div>
                             )}
                             {updatedRecently === account._id && (
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#10b981' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--wp-success)' }}>
                                 <Activity size={12} />
                                 <span>Updated successfully</span>
                               </div>
@@ -1678,10 +1646,10 @@ const SettingsPage = () => {
                               disabled={isDeletingUser === account._id || updatingUserId === account._id}
                               style={{
                                 padding: '10px 16px',
-                                border: '1.5px solid #e2e8f0',
+                                border: '1.5px solid var(--wp-border)',
                                 borderRadius: '8px',
                                 background: 'white',
-                                color: '#475569',
+                                color: 'var(--wp-text-muted)',
                                 cursor: isDeletingUser === account._id || updatingUserId === account._id ? 'not-allowed' : 'pointer',
                                 display: 'flex',
                                 alignItems: 'center',
@@ -1693,15 +1661,15 @@ const SettingsPage = () => {
                               }}
                               onMouseEnter={(e) => {
                                 if (isDeletingUser !== account._id && updatingUserId !== account._id) {
-                                  e.currentTarget.style.borderColor = '#3b82f6';
-                                  e.currentTarget.style.color = '#2563eb';
-                                  e.currentTarget.style.background = '#eff6ff';
+                                  e.currentTarget.style.borderColor = 'var(--wp-primary)';
+                                  e.currentTarget.style.color = 'var(--wp-primary)';
+                                  e.currentTarget.style.background = 'var(--wp-primary-muted)';
                                 }
                               }}
                               onMouseLeave={(e) => {
                                 if (isDeletingUser !== account._id && updatingUserId !== account._id) {
-                                  e.currentTarget.style.borderColor = '#e2e8f0';
-                                  e.currentTarget.style.color = '#475569';
+                                  e.currentTarget.style.borderColor = 'var(--wp-border)';
+                                  e.currentTarget.style.color = 'var(--wp-text-muted)';
                                   e.currentTarget.style.background = 'white';
                                 }
                               }}
@@ -1715,10 +1683,10 @@ const SettingsPage = () => {
                               disabled={isDeletingUser === account._id || updatingUserId === account._id}
                               style={{
                                 padding: '10px 16px',
-                                border: '1.5px solid #fee2e2',
+                                border: '1.5px solid var(--wp-error-bg)',
                                 borderRadius: '8px',
-                                background: isDeletingUser === account._id ? '#fecaca' : 'white',
-                                color: isDeletingUser === account._id ? '#991b1b' : '#dc2626',
+                                background: isDeletingUser === account._id ? 'var(--wp-error-border)' : 'white',
+                                color: isDeletingUser === account._id ? 'var(--wp-error)' : 'var(--wp-error)',
                                 cursor: isDeletingUser === account._id || updatingUserId === account._id ? 'not-allowed' : 'pointer',
                                 display: 'flex',
                                 alignItems: 'center',
@@ -1730,13 +1698,13 @@ const SettingsPage = () => {
                               }}
                               onMouseEnter={(e) => {
                                 if (isDeletingUser !== account._id && updatingUserId !== account._id) {
-                                  e.currentTarget.style.borderColor = '#fecaca';
-                                  e.currentTarget.style.background = '#fee2e2';
+                                  e.currentTarget.style.borderColor = 'var(--wp-error-border)';
+                                  e.currentTarget.style.background = 'var(--wp-error-bg)';
                                 }
                               }}
                               onMouseLeave={(e) => {
                                 if (isDeletingUser !== account._id && updatingUserId !== account._id) {
-                                  e.currentTarget.style.borderColor = '#fee2e2';
+                                  e.currentTarget.style.borderColor = 'var(--wp-error-border)';
                                   e.currentTarget.style.background = 'white';
                                 }
                               }}
@@ -1770,11 +1738,11 @@ const SettingsPage = () => {
           </>
         ) : activeTab === 'teams' ? (
           <>
-            <div style={{ marginBottom: '24px' }}>
-              <h2 style={{ fontSize: '22px', fontWeight: 700, color: '#0f172a', margin: '0 0 8px 0' }}>
+            <div style={{ marginBottom: '16px' }}>
+              <h2 style={{ fontSize: '17px', fontWeight: 600, color: 'var(--wp-text)', margin: '0 0 4px 0' }}>
                 Teams & Permissions
               </h2>
-              <p style={{ fontSize: '14px', color: '#64748b', margin: 0 }}>
+              <p style={{ fontSize: '13px', color: 'var(--wp-text-muted)', margin: 0 }}>
                 Create custom teams and configure granular permissions for each team
               </p>
             </div>
@@ -1792,7 +1760,7 @@ const SettingsPage = () => {
                 setNewTeamForm({
                   name: '',
                   description: '',
-                  color: '#3b82f6',
+                  color: 'var(--wp-primary)',
                   icon: 'users',
                   permissions: [],
                 });
@@ -1804,10 +1772,7 @@ const SettingsPage = () => {
               </UsersHeader>
 
             {isLoadingTeams ? (
-              <LoadingWrapper>
-                <Spinner size={18} />
-                Loading teams...
-              </LoadingWrapper>
+              <MemberListSkeleton rows={4} label="Loading teams" />
             ) : teams.length === 0 ? (
               <EmptyState>No teams found. Create your first team to get started.</EmptyState>
             ) : (
@@ -1821,7 +1786,7 @@ const SettingsPage = () => {
                             width: '40px',
                             height: '40px',
                             borderRadius: '12px',
-                            background: team.color || '#3b82f6',
+                            background: team.color || 'var(--wp-primary)',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
@@ -1835,12 +1800,12 @@ const SettingsPage = () => {
                         <div>
                           <strong>{team.name}</strong>
                           {team.isSystem && (
-                            <span style={{ fontSize: '11px', color: '#64748b', marginLeft: '8px', fontWeight: 600 }}>
+                            <span style={{ fontSize: '11px', color: 'var(--wp-text-muted)', marginLeft: '8px', fontWeight: 600 }}>
                               SYSTEM
                             </span>
                           )}
                           {team.description && (
-                            <div style={{ fontSize: '13px', color: '#64748b', marginTop: '4px' }}>
+                            <div style={{ fontSize: '13px', color: 'var(--wp-text-muted)', marginTop: '4px' }}>
                               {team.description}
                             </div>
                           )}
@@ -1849,24 +1814,24 @@ const SettingsPage = () => {
                     </UserIdentity>
                     <RoleBadgeGroup>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
-                        <div style={{ fontSize: '12px', fontWeight: 600, color: '#64748b', marginBottom: '4px' }}>
+                        <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--wp-text-muted)', marginBottom: '4px' }}>
                           Permissions ({team.permissions?.length || 0})
                         </div>
                         {team.permissions && team.permissions.length > 0 ? (
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                             {team.permissions.slice(0, 5).map(perm => (
-                              <RoleBadge key={perm} bg="rgba(59, 130, 246, 0.1)" color="#2563eb" style={{ fontSize: '11px' }}>
+                              <RoleBadge key={perm} bg="rgba(59, 130, 246, 0.1)" color="var(--wp-primary)" style={{ fontSize: '11px' }}>
                                 {perm.replace('.', ' ')}
                               </RoleBadge>
                             ))}
                             {team.permissions.length > 5 && (
-                              <RoleBadge bg="rgba(100, 116, 139, 0.1)" color="#64748b" style={{ fontSize: '11px' }}>
+                              <RoleBadge bg="rgba(100, 116, 139, 0.1)" color="var(--wp-text-muted)" style={{ fontSize: '11px' }}>
                                 +{team.permissions.length - 5} more
                               </RoleBadge>
                             )}
                           </div>
                         ) : (
-                          <span style={{ fontSize: '12px', color: '#94a3b8' }}>No permissions assigned</span>
+                          <span style={{ fontSize: '12px', color: 'var(--wp-text-subtle)' }}>No permissions assigned</span>
                         )}
                       </div>
                     </RoleBadgeGroup>
@@ -1875,7 +1840,7 @@ const SettingsPage = () => {
                         type="button"
                         active={false}
                         onClick={() => handleEditTeam(team)}
-                        style={{ background: '#eff6ff', borderColor: '#bfdbfe', color: '#2563eb' }}
+                        style={{ background: 'var(--wp-primary-muted)', borderColor: 'var(--wp-primary-border)', color: 'var(--wp-primary)' }}
                       >
                         ✏️ Edit
                       </RoleToggle>
@@ -1884,7 +1849,7 @@ const SettingsPage = () => {
                           type="button"
                           active={false}
                           onClick={() => handleDeleteTeam(team._id)}
-                          style={{ background: '#fee2e2', borderColor: '#fecaca', color: '#dc2626' }}
+                          style={{ background: 'var(--wp-error-bg)', borderColor: 'var(--wp-error-border)', color: 'var(--wp-error)' }}
                         >
                           🗑️ Delete
                         </RoleToggle>
@@ -1902,19 +1867,16 @@ const SettingsPage = () => {
           </>
         ) : activeTab === 'kanban' ? (
           <>
-            <div style={{ marginBottom: '24px' }}>
-              <h2 style={{ fontSize: '22px', fontWeight: 700, color: '#0f172a', margin: '0 0 8px 0' }}>
+            <div style={{ marginBottom: '16px' }}>
+              <h2 style={{ fontSize: '17px', fontWeight: 600, color: 'var(--wp-text)', margin: '0 0 4px 0' }}>
                 Kanban board
               </h2>
-              <p style={{ fontSize: '14px', color: '#64748b', margin: 0 }}>
+              <p style={{ fontSize: '13px', color: 'var(--wp-text-muted)', margin: 0 }}>
                 Add or rename columns (e.g. Backlog, Review, Done). They appear left-to-right on the Tasks board. Mark exactly one column as <strong>Done column</strong> (completion + stats).
               </p>
             </div>
             {isLoadingKanban ? (
-              <LoadingWrapper>
-                <Spinner size={18} />
-                Loading Kanban configuration…
-              </LoadingWrapper>
+              <FieldRowsSkeleton rows={3} label="Loading board columns" />
             ) : (
               <UsersSection>
                 <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
@@ -1942,7 +1904,7 @@ const SettingsPage = () => {
                   {kanbanDraft.map((col, index) => (
                     <UserRow key={col.id} style={{ alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 200, flex: 1 }}>
-                        <label style={{ fontSize: 12, fontWeight: 600, color: '#64748b' }}>Label</label>
+                        <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--wp-text-muted)' }}>Label</label>
                         <input
                           type="text"
                           value={col.label}
@@ -1955,13 +1917,13 @@ const SettingsPage = () => {
                           style={{
                             padding: '10px 12px',
                             borderRadius: 8,
-                            border: '1.5px solid #e2e8f0',
+                            border: '1.5px solid var(--wp-border)',
                             fontSize: 14,
                           }}
                         />
                       </div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: 120 }}>
-                        <label style={{ fontSize: 12, fontWeight: 600, color: '#64748b' }}>Color</label>
+                        <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--wp-text-muted)' }}>Color</label>
                         <input
                           type="color"
                           value={col.color}
@@ -1974,7 +1936,7 @@ const SettingsPage = () => {
                           style={{ height: 40, border: 'none', cursor: 'pointer' }}
                         />
                       </div>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13, fontWeight: 600, color: '#334155' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13, fontWeight: 600, color: 'var(--wp-text)' }}>
                         <input
                           type="radio"
                           name="kanban-done-col"
@@ -2002,7 +1964,7 @@ const SettingsPage = () => {
                           style={{
                             padding: 8,
                             borderRadius: 8,
-                            border: '1px solid #e2e8f0',
+                            border: '1px solid var(--wp-border)',
                             background: '#fff',
                             cursor: index === 0 ? 'not-allowed' : 'pointer',
                           }}
@@ -2023,7 +1985,7 @@ const SettingsPage = () => {
                           style={{
                             padding: 8,
                             borderRadius: 8,
-                            border: '1px solid #e2e8f0',
+                            border: '1px solid var(--wp-border)',
                             background: '#fff',
                             cursor: index === kanbanDraft.length - 1 ? 'not-allowed' : 'pointer',
                           }}
@@ -2048,9 +2010,9 @@ const SettingsPage = () => {
                           style={{
                             padding: '8px 12px',
                             borderRadius: 8,
-                            border: '1px solid #fecaca',
+                            border: '1px solid var(--wp-error-border)',
                             background: '#fff',
-                            color: '#dc2626',
+                            color: 'var(--wp-error)',
                             fontWeight: 600,
                             fontSize: 12,
                           }}
@@ -2058,7 +2020,7 @@ const SettingsPage = () => {
                           Remove
                         </button>
                       </div>
-                      <span style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'monospace' }}>id: {col.id}</span>
+                      <span style={{ fontSize: 11, color: 'var(--wp-text-subtle)', fontFamily: 'monospace' }}>id: {col.id}</span>
                     </UserRow>
                   ))}
                 </div>
@@ -2074,7 +2036,7 @@ const SettingsPage = () => {
                           {
                             id,
                             label: `New column ${n}`,
-                            color: '#64748b',
+                            color: 'var(--wp-text-muted)',
                             order: prev.length,
                             isDone: false,
                           },
@@ -2091,7 +2053,7 @@ const SettingsPage = () => {
           </>
         ) : (
           <PlaceholderCard>
-            <PlaceholderIcon size={36} color="#2563eb" />
+            <PlaceholderIcon size={36} color="var(--wp-primary)" />
             <h3>{activeTabDefinition.label}</h3>
             <p>{activeTabDefinition.description}</p>
             <ComingSoonTag>In roadmap</ComingSoonTag>
@@ -2162,13 +2124,15 @@ const SettingsPage = () => {
                 />
               </FormGroup>
               <FormGroup>
-                <label htmlFor="password">Password {editingUser ? '(leave blank to keep current)' : '*'}</label>
+                <label htmlFor="password">
+                  {editingUser ? 'Password (leave blank to keep current)' : 'Temporary password *'}
+                </label>
                 <input
                   id="password"
                   type="password"
                   value={newUserForm.password}
                   onChange={(e) => setNewUserForm(prev => ({ ...prev, password: e.target.value }))}
-                  placeholder={editingUser ? "Leave blank to keep current password" : "Minimum 6 characters"}
+                  placeholder={editingUser ? 'Leave blank to keep current password' : 'User must change this on first login'}
                   required={!editingUser}
                   minLength={editingUser ? 0 : 6}
                   disabled={isCreatingUser}
@@ -2219,7 +2183,7 @@ const SettingsPage = () => {
                       </RoleCheckbox>
                     ))
                   ) : (
-                    <div style={{ padding: '12px', color: '#64748b', fontSize: '13px' }}>
+                    <div style={{ padding: '12px', color: 'var(--wp-text-muted)', fontSize: '13px' }}>
                       No teams available. Create teams in the Teams & Permissions tab.
                     </div>
                   )}
@@ -2324,7 +2288,7 @@ const SettingsPage = () => {
               </FormRow>
               <FormGroup>
                 <label>Permissions</label>
-                <div style={{ maxHeight: '300px', overflowY: 'auto', border: '2px solid #e2e8f0', borderRadius: '12px', padding: '16px', background: '#f8fafc' }}>
+                <div style={{ maxHeight: '300px', overflowY: 'auto', border: '1px solid var(--wp-border)', borderRadius: '8px', padding: '16px', background: 'var(--wp-surface-2)' }}>
                   {availablePermissions.length > 0 ? (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                       {availablePermissions.map(permission => {
@@ -2348,9 +2312,7 @@ const SettingsPage = () => {
                       })}
                     </div>
                   ) : (
-                    <div style={{ textAlign: 'center', padding: '20px', color: '#64748b' }}>
-                      Loading permissions...
-                    </div>
+                    <ItemListSkeleton rows={4} label="Loading permissions" />
                   )}
                 </div>
               </FormGroup>
@@ -2364,7 +2326,7 @@ const SettingsPage = () => {
                     setNewTeamForm({
                       name: '',
                       description: '',
-                      color: '#3b82f6',
+                      color: 'var(--wp-primary)',
                       icon: 'users',
                       permissions: [],
                     });

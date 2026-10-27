@@ -1,19 +1,264 @@
-body {
-  margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
+/*
+ * WorkPilot design tokens.
+ * Cool graphite neutrals, one engineering-blue accent, a dark sidebar in both
+ * themes. Every component reads these variables, so this file is the theme.
+ */
+:root,
+[data-theme='light'] {
+  color-scheme: light;
+
+  /* Base */
+  --wp-bg: #f4f5f7;
+  --wp-bg-subtle: #f9fafb;
+  --wp-surface: #ffffff;
+  --wp-surface-2: #f1f3f5;
+  --wp-surface-3: #e8ebef;
+  --wp-surface-elevated: #ffffff;
+
+  /* Borders */
+  --wp-border: #dfe3e8;
+  --wp-border-strong: #c7cdd5;
+  --wp-border-subtle: #eceff2;
+
+  /* Text */
+  --wp-text: #111418;
+  --wp-text-muted: #4a5361;
+  --wp-text-subtle: #6b7482;
+  --wp-text-disabled: #9aa2ae;
+  --wp-on-primary: #ffffff;
+
+  /* Brand */
+  --wp-primary: #1f5fd6;
+  --wp-primary-hover: #184db1;
+  --wp-primary-muted: #edf3fd;
+  --wp-primary-border: #c2d5f5;
+
+  /* Semantic */
+  --wp-success: #12804a;
+  --wp-success-bg: #ebf7f0;
+  --wp-success-border: #b6e2c8;
+  --wp-warning: #b45309;
+  --wp-warning-bg: #fdf5e6;
+  --wp-warning-border: #f3d79c;
+  --wp-error: #c62828;
+  --wp-error-bg: #fdeeee;
+  --wp-error-border: #f3c2c2;
+  --wp-info: #1f5fd6;
+  --wp-info-bg: #edf3fd;
+  --wp-info-border: #c2d5f5;
+
+  /* Interactive */
+  --wp-hover: rgba(17, 20, 24, 0.04);
+  --wp-active: rgba(17, 20, 24, 0.07);
+  --wp-disabled-bg: #f1f3f5;
+  --wp-disabled-text: #9aa2ae;
+  --wp-focus-ring: rgba(31, 95, 214, 0.25);
+
+  /* Chrome: graphite sidebar in both themes */
+  --wp-sidebar-bg: #15181d;
+  --wp-sidebar-border: #232830;
+  --wp-sidebar-text: #aab2bf;
+  --wp-sidebar-text-strong: #f1f3f6;
+  --wp-sidebar-hover: rgba(255, 255, 255, 0.06);
+  --wp-sidebar-active: rgba(76, 141, 255, 0.16);
+  --wp-sidebar-accent: #6aa1ff;
+  --wp-header-bg: #ffffff;
+  --wp-overlay: rgba(10, 12, 16, 0.5);
+  --wp-shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06);
+  --wp-shadow-md: 0 4px 12px rgba(16, 24, 40, 0.08);
+  --wp-shadow-lg: 0 12px 28px rgba(16, 24, 40, 0.12);
+  --wp-shadow-xl: 0 24px 48px rgba(16, 24, 40, 0.16);
+
+  /* Inputs */
+  --wp-input-bg: #ffffff;
+  --wp-input-border: #cfd5dc;
+  --wp-input-placeholder: #9aa2ae;
+
+  /* Loading skeleton bones */
+  --wp-skeleton: #e2e6eb;
+
+  /* Scrollbar */
+  --wp-scrollbar: #c7cdd5;
+  --wp-scrollbar-hover: #9aa2ae;
+
+  /* Shape & type */
+  --wp-radius-sm: 4px;
+  --wp-radius: 6px;
+  --wp-radius-lg: 8px;
+  --wp-font-sans: 'Segoe UI Variable Text', 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+  --wp-font-mono: 'Cascadia Mono', 'JetBrains Mono', Consolas, 'SF Mono', Menlo, monospace;
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  /* Base */
+  --wp-bg: #0e1014;
+  --wp-bg-subtle: #0b0d10;
+  --wp-surface: #15181d;
+  --wp-surface-2: #1b1f25;
+  --wp-surface-3: #232830;
+  --wp-surface-elevated: #1b1f25;
+
+  /* Borders */
+  --wp-border: #2a3038;
+  --wp-border-strong: #3a414c;
+  --wp-border-subtle: #1f242b;
+
+  /* Text */
+  --wp-text: #e8ebef;
+  --wp-text-muted: #a3abb7;
+  --wp-text-subtle: #737c89;
+  --wp-text-disabled: #535b67;
+  --wp-on-primary: #ffffff;
+
+  /* Brand */
+  --wp-primary: #4c8dff;
+  --wp-primary-hover: #6aa1ff;
+  --wp-primary-muted: rgba(76, 141, 255, 0.14);
+  --wp-primary-border: rgba(76, 141, 255, 0.38);
+
+  /* Semantic */
+  --wp-success: #4cc38a;
+  --wp-success-bg: rgba(76, 195, 138, 0.12);
+  --wp-success-border: rgba(76, 195, 138, 0.3);
+  --wp-warning: #f0b44c;
+  --wp-warning-bg: rgba(240, 180, 76, 0.12);
+  --wp-warning-border: rgba(240, 180, 76, 0.3);
+  --wp-error: #f07272;
+  --wp-error-bg: rgba(240, 114, 114, 0.12);
+  --wp-error-border: rgba(240, 114, 114, 0.3);
+  --wp-info: #6aa1ff;
+  --wp-info-bg: rgba(76, 141, 255, 0.12);
+  --wp-info-border: rgba(76, 141, 255, 0.3);
+
+  /* Interactive */
+  --wp-hover: rgba(255, 255, 255, 0.05);
+  --wp-active: rgba(255, 255, 255, 0.08);
+  --wp-disabled-bg: #1b1f25;
+  --wp-disabled-text: #535b67;
+  --wp-focus-ring: rgba(76, 141, 255, 0.35);
+
+  /* Chrome */
+  --wp-sidebar-bg: #0b0d10;
+  --wp-sidebar-border: #1f242b;
+  --wp-header-bg: #15181d;
+  --wp-overlay: rgba(0, 0, 0, 0.62);
+  --wp-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --wp-shadow-md: 0 4px 14px rgba(0, 0, 0, 0.4);
+  --wp-shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.5);
+  --wp-shadow-xl: 0 24px 56px rgba(0, 0, 0, 0.6);
+
+  /* Inputs */
+  --wp-input-bg: #111418;
+  --wp-input-border: #313844;
+  --wp-input-placeholder: #5d6672;
+
+  /* Loading skeleton bones */
+  --wp-skeleton: #262c35;
+
+  /* Scrollbar */
+  --wp-scrollbar: #3a414c;
+  --wp-scrollbar-hover: #535b67;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+body {
+  margin: 0;
+  font-family: var(--wp-font-sans);
+  font-size: 14px;
+  line-height: 1.45;
+  background: var(--wp-bg);
+  color: var(--wp-text);
   min-height: 100vh;
+  font-variant-numeric: tabular-nums;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  letter-spacing: inherit;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  letter-spacing: -0.01em;
 }
 
 code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
-    monospace;
+  font-family: var(--wp-font-mono);
 }
 
+:focus-visible {
+  outline: 2px solid var(--wp-primary);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: var(--wp-primary-muted);
+  color: var(--wp-text);
+}
+
+/* Scrollbars */
 * {
-  box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: var(--wp-scrollbar) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--wp-scrollbar);
+  border-radius: 10px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--wp-scrollbar-hover);
+  background-clip: padding-box;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

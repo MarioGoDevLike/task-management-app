@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, useDeferredValue } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import styled from 'styled-components';
 import { useAuth } from '../contexts/AuthContext';
@@ -6,7 +7,38 @@ import { useTasks } from '../contexts/TasksContext';
 import { tasksAPI, adminAPI, projectsAPI, DEFAULT_KANBAN_COLUMNS, normalizeKanbanColumns } from '../services/api';
 import { toast } from 'react-hot-toast';
 import { getDb } from '../firebase/app';
-import { SectionLoader } from './AppLoader';
+import { TasksPageSkeleton, TaskViewSkeleton } from './AppLoader';
+import TaskFormModal from './TaskFormModal';
+import TaskDetailDrawer from './TaskDetailDrawer';
+import TaskImageAttachZone from './TaskImageAttachZone';
+import {
+  TaskCardBody,
+  TaskRowActions,
+  StatusTag,
+  PriorityTag,
+  DueTag,
+  AssigneeStack,
+  getTaskPreview,
+  getTaskAssignees,
+  getUserInitials,
+  getUserDisplayName,
+} from './TaskCard';
+import { toDateInputValue, getDueVariant } from '../utils/taskDates';
+import { hasPermission } from '../utils/permissions';
+import {
+  TASK_IMAGE_ACCEPT,
+  TASK_IMAGE_MAX_COUNT,
+  EMPTY_INLINE_ADD_DRAFT,
+  imagesToDescriptionHtml,
+  processTaskImageFiles,
+  prepareImageDataUrlForTask,
+  validateTaskImageFile,
+  parseImagesFromDescription,
+  removeImageFromDescription,
+  buildTaskDescription,
+  validateDescriptionForFirestore,
+  ensureImageDataUrlsFitTaskStorage,
+} from '../utils/taskImages';
 import {
   collection,
   addDoc,
@@ -20,12 +52,9 @@ import {
 } from 'firebase/firestore';
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
-import { 
-  CheckCircle2, 
-  Edit, 
-  Trash2, 
-  PlayCircle, 
-  RotateCcw,
+import {
+  CheckCircle2,
+  Trash2,
   AlertTriangle,
   X,
   UserPlus,
@@ -33,11 +62,22 @@ import {
   Search,
   Columns3,
   List,
-  FolderKanban,
   ChevronDown,
   Check,
   Plus,
+  LayoutGrid,
 } from 'lucide-react';
+
+/** Map Firebase / API errors when saving tasks with large descriptions. */
+function getTaskSaveErrorMessage(error, description) {
+  const msg = String(error?.response?.data?.message || error?.message || '');
+  if (msg.includes('longer than') || msg.includes('1048487')) {
+    return 'Task content is too large. Remove some images or use smaller photos.';
+  }
+  const sizeErr = validateDescriptionForFirestore(description);
+  if (sizeErr) return sizeErr;
+  return msg || 'Failed to save task';
+}
 
 /** Plain-text description from the create-task form → safe HTML for Firestore. */
 function plainTextToSafeDescriptionHtml(text) {
@@ -53,1037 +93,547 @@ function plainTextToSafeDescriptionHtml(text) {
   return `<p>${escaped.join('<br>')}</p>`;
 }
 
-function isYmdDateString(v) {
-  return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
-}
-
-function toDateInputValue(value) {
-  if (!value) return '';
-  if (isYmdDateString(value)) return value;
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return '';
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-}
-
-function getDueDayBounds(dueDate) {
-  if (!dueDate) return null;
-  if (isYmdDateString(dueDate)) {
-    const start = new Date(`${dueDate}T00:00:00`);
-    const end = new Date(`${dueDate}T23:59:59`);
-    return { start, end };
-  }
-  const d = new Date(dueDate);
-  if (Number.isNaN(d.getTime())) return null;
-  const start = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0);
-  const end = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59);
-  return { start, end };
-}
-
-function getDueVariant(dueDate) {
-  const bounds = getDueDayBounds(dueDate);
-  if (!bounds) return null;
-  const now = new Date();
-  if (bounds.end.getTime() < now.getTime()) return 'overdue';
-  if (bounds.start.getTime() <= now.getTime() && bounds.end.getTime() >= now.getTime()) return 'today';
-  return 'upcoming';
-}
-
-function formatDueLabel(dueDate) {
-  const bounds = getDueDayBounds(dueDate);
-  if (!bounds) return '';
-  const due = bounds.start;
-  return due.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-}
-
-const Container = styled.div`
-  min-height: 100vh;
-  background: white;
-  padding: 24px 16px;
+const MobileListView = styled.div`
+  display: none;
 
   @media (max-width: 768px) {
-    padding: 12px 10px;
-  }
-`;
-
-const ContentWrapper = styled.div`
-  max-width: 100%;
-  margin: 0;
-`;
-
-const Header = styled.header`
-  background: white;
-  border-radius: 16px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-  padding: 20px 32px;
-  margin-bottom: 24px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  border: 1px solid #e8ecf0;
-`;
-
-const WelcomeSection = styled.div`
-  h1 {
-    font-size: 24px;
-    font-weight: 700;
-    color: #0f172a;
-    margin: 0 0 4px 0;
-    letter-spacing: -0.3px;
-  }
-    
-  p {
-    color: #64748b;
-    font-size: 13px;
-    margin: 0;
-    font-weight: 400;
-  }
-`;
-
-const StatsGrid = styled.div`
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 12px;
-  margin-bottom: 18px;
-
-  @media (max-width: 768px) {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-  }
-`;
-
-const StatCard = styled.div`
-  background: white;
-  border-radius: 16px;
-  padding: 24px;
-  border: 1px solid #e8ecf0;
-  transition: all 0.3s ease;
-  cursor: pointer;
-  position: relative;
-  overflow: hidden;
-  
-  &::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 3px;
-    background: ${props => props.highlight || '#64748b'};
-  }
-  
-  &:hover {
-    border-color: #cbd5e1;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
-    transform: translateY(-2px);
-  }
-  
-  .label {
-    font-size: 12px;
-    color: #64748b;
-    margin-bottom: 12px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
-  }
-  
-  .value {
-    font-size: 36px;
-    font-weight: 800;
-    color: #0f172a;
-    margin: 0;
-    line-height: 1;
-    letter-spacing: -1px;
-  }
-  
-  .trend {
-    font-size: 12px;
-    color: #64748b;
-    margin-top: 8px;
-    font-weight: 500;
-  }
-
-  @media (max-width: 768px) {
-    padding: 14px 12px;
-    border-radius: 12px;
-
-    .label {
-      font-size: 10px;
-      margin-bottom: 8px;
-    }
-
-    .value {
-      font-size: 24px;
-      letter-spacing: -0.4px;
-    }
-
-    .trend {
-      font-size: 10px;
-      margin-top: 6px;
-    }
-  }
-`;
-
-const MainContent = styled.div`
-  background: white;
-  border: 1px solid #e8ecf0;
-  border-radius: 14px;
-  padding: 14px;
-
-  @media (max-width: 768px) {
-    border-radius: 10px;
-    padding: 10px;
-  }
-`;
-
-const KanbanBoard = styled.div`
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 12px;
-  padding: 0;
-  height: calc(100vh - 320px);
-  overflow-x: auto;
-  overflow-y: hidden;
-  
-  @media (max-width: 1024px) {
-    grid-template-columns: 1fr;
-    height: auto;
-  }
-
-  @media (max-width: 768px) {
-    gap: 10px;
-  }
-`;
-
-const KanbanColumn = styled.div`
-  background: #f8fafc;
-  border-radius: 10px;
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  min-height: 100%;
-  border: 1px solid #e2e8f0;
-
-  @media (max-width: 768px) {
-    padding: 10px;
-  }
-`;
-
-const ColumnHeader = styled.div`
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 10px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid ${props => props.color}66;
-`;
-
-const ColumnTitle = styled.h3`
-  font-size: 12px;
-  font-weight: 700;
-  color: #0f172a;
-  margin: 0;
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  
-  &::before {
-    content: '';
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: ${props => props.color};
-  }
-`;
-
-const ColumnCount = styled.span`
-  background: ${props => props.color}20;
-  color: ${props => props.color};
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 600;
-`;
-
-const ColumnTasks = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  flex: 1;
-  overflow-y: auto;
-  
-  &::-webkit-scrollbar {
-    width: 8px;
-  }
-  
-  &::-webkit-scrollbar-track {
-    background: transparent;
-  }
-  
-  &::-webkit-scrollbar-thumb {
-    background: #cbd5e1;
-    border-radius: 4px;
-    
-    &:hover {
-      background: #94a3b8;
-    }
-  }
-`;
-
-const ListViewShell = styled.div`
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  overflow-x: auto;
-  overflow-y: auto;
-  background: #fff;
-  max-height: calc(100vh - 320px);
-  -webkit-overflow-scrolling: touch;
-
-  @media (max-width: 768px) {
-    max-height: none;
-  }
-`;
-
-const ListHeaderRow = styled.div`
-  display: grid;
-  grid-template-columns: minmax(280px, 2fr) 120px 140px 180px 180px;
-  min-width: 900px;
-  gap: 10px;
-  padding: 10px 12px;
-  background: #f8fafc;
-  border-bottom: 1px solid #e2e8f0;
-  font-size: 11px;
-  font-weight: 700;
-  color: #475569;
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-`;
-
-const ListRow = styled.div`
-  display: grid;
-  grid-template-columns: minmax(280px, 2fr) 120px 140px 180px 180px;
-  min-width: 900px;
-  gap: 10px;
-  padding: 10px 12px;
-  border-bottom: 1px solid #f1f5f9;
-  align-items: center;
-
-  &:hover {
-    background: #f8fafc;
-  }
-`;
-
-const ListTaskTitle = styled.button`
-  border: none;
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-  color: #0f172a;
-  font-size: 13px;
-  font-weight: 600;
-  padding: 0;
-  width: fit-content;
-`;
-
-const ListTaskSub = styled.div`
-  color: #64748b;
-  font-size: 11px;
-  margin-top: 2px;
-`;
-
-const StatusChip = styled.span`
-  width: fit-content;
-  padding: 3px 8px;
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.2px;
-  color: #0f172a;
-`;
-
-const KanbanTask = styled.div`
-  background: white;
-  padding: 8px 9px;
-  border-radius: 9px;
-  border: 1px solid #e8ecf0;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-  cursor: pointer;
-  transition: all 0.2s ease;
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  
-  &::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    width: 4px;
-    background: ${props => {
-      if (props.priority === 'urgent') return '#ef4444';
-      if (props.priority === 'high') return '#f59e0b';
-      if (props.priority === 'medium') return '#3b82f6';
-      return '#94a3b8';
-    }};
-    border-radius: 12px 0 0 12px;
-  }
-  
-  &:hover {
-    box-shadow: 0 3px 9px rgba(15, 23, 42, 0.09);
-    transform: translateY(-1px);
-    border-color: #cbd5e1;
-  }
-`;
-
-const KanbanTaskHeader = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-`;
-
-const KanbanTaskTitle = styled.div`
-  font-size: 12px;
-  font-weight: 600;
-  color: #0f172a;
-  line-height: 1.5;
-  flex: 1;
-  word-break: break-word;
-  ${props => props.completed && `
-    text-decoration: line-through;
-    opacity: 0.6;
-  `}
-`;
-
-const KanbanTaskMeta = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-`;
-
-const KanbanTaskPriorityBadge = styled.span`
-  display: inline-flex;
-  align-items: center;
-  padding: 3px 7px;
-  border-radius: 999px;
-  font-size: 9px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-  background: ${props => {
-    if (props.priority === 'urgent') return '#fee2e2';
-    if (props.priority === 'high') return '#fef3c7';
-    if (props.priority === 'medium') return '#dbeafe';
-    return '#f1f5f9';
-  }};
-  color: ${props => {
-    if (props.priority === 'urgent') return '#991b1b';
-    if (props.priority === 'high') return '#92400e';
-    if (props.priority === 'medium') return '#1e40af';
-    return '#475569';
-  }};
-`;
-
-const DueBadge = styled.span`
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 7px;
-  border-radius: 999px;
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.2px;
-  text-transform: uppercase;
-  white-space: nowrap;
-  background: ${(p) => {
-    if (p.$variant === 'overdue') return '#fee2e2';
-    if (p.$variant === 'today') return '#dbeafe';
-    return '#fef3c7';
-  }};
-  color: ${(p) => {
-    if (p.$variant === 'overdue') return '#991b1b';
-    if (p.$variant === 'today') return '#1d4ed8';
-    return '#92400e';
-  }};
-  border: ${(p) => {
-    if (p.$variant === 'overdue') return '1px solid #fecaca';
-    if (p.$variant === 'today') return '1px solid #bfdbfe';
-    return '1px solid #fde68a';
-  }};
-`;
-
-const KanbanTaskAssignee = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 10px;
-  color: #64748b;
-  flex-wrap: wrap;
-  
-  .avatar {
-    width: 18px;
-    height: 18px;
-    border-radius: 5px;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     display: flex;
-    align-items: center;
-    justify-content: center;
-    color: white;
-    font-weight: 600;
-    font-size: 8px;
-    flex-shrink: 0;
-    border: 1.5px solid white;
-    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.05);
-  }
-  
-  .assignee-item {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-  }
-  
-  .more-count {
-    font-weight: 600;
-    color: #475569;
-  }
-`;
-
-const KanbanTaskDescription = styled.div`
-  font-size: 11px;
-  color: #64748b;
-  line-height: 1.4;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  margin-top: 2px;
-  
-  * {
-    font-size: 11px !important;
-    color: #64748b !important;
-  }
-`;
-
-const KanbanTaskFooter = styled.div`
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-top: 2px;
-  padding-top: 7px;
-  border-top: 1px solid #f1f5f9;
-  gap: 8px;
-`;
-
-const KanbanTaskActions = styled.div`
-  display: flex;
-  gap: 2px;
-  flex-wrap: wrap;
-  margin-left: auto;
-  align-items: center;
-`;
-
-const MoveStatusSelect = styled.select`
-  font-size: 10px;
-  font-weight: 600;
-  padding: 4px 24px 4px 8px;
-  border-radius: 8px;
-  border: 1px solid #bfdbfe;
-  background: linear-gradient(135deg, #ffffff 0%, #eff6ff 100%);
-  color: #475569;
-  max-width: 118px;
-  cursor: pointer;
-  appearance: none;
-  transition: all 0.18s ease;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='none' stroke='%2364748b' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round' d='M3 4.5 6 7.5 9 4.5'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 7px center;
-
-  &:hover {
-    border-color: #93c5fd;
-    box-shadow: 0 2px 6px rgba(30, 64, 175, 0.1);
-  }
-
-  &:focus {
-    outline: none;
-    border-color: #60a5fa;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.14);
-  }
-`;
-
-const KanbanIconButton = styled.button`
-  background: transparent;
-  border: none;
-  padding: 5px;
-  cursor: pointer;
-  border-radius: 6px;
-  transition: all 0.2s ease;
-  color: ${props => {
-    if (props.completed) return '#10b981';
-    if (props.danger) return '#ef4444';
-    if (props.edit) return '#3b82f6';
-    if (props.assign) return '#7c3aed';
-    return '#64748b';
-  }};
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  
-  svg {
-    width: 14px;
-    height: 14px;
-  }
-  
-  &:hover {
-    background: ${props => {
-      if (props.completed) return '#d1fae5';
-      if (props.danger) return '#fee2e2';
-      if (props.edit) return '#eff6ff';
-      if (props.assign) return '#f3e8ff';
-      return '#f1f5f9';
-    }};
-    color: ${props => {
-      if (props.completed) return '#059669';
-      if (props.danger) return '#dc2626';
-      if (props.edit) return '#2563eb';
-      if (props.assign) return '#6d28d9';
-      return '#475569';
-    }};
-    transform: scale(1.1);
-  }
-  
-  &:active {
-    transform: scale(0.95);
-  }
-  
-  &[title] {
-    position: relative;
-  }
-`;
-
-const HeaderActions = styled.div`
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 14px;
-
-  @media (max-width: 768px) {
     flex-direction: column;
-    align-items: stretch;
     gap: 10px;
   }
 `;
 
-const ProjectBar = styled.div`
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-bottom: 12px;
-  padding: 12px;
-  border: 1px solid #dbeafe;
-  border-radius: 12px;
-  background: linear-gradient(180deg, #f8fbff 0%, #f8fafc 100%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
-
-  @media (max-width: 768px) {
-    padding: 10px;
-    gap: 10px;
-  }
-`;
-
-const ProjectActions = styled.div`
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-
-  @media (max-width: 768px) {
-    width: 100%;
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px;
-  }
-`;
-
-const ProjectManagerHeader = styled.div`
-  margin-bottom: 14px;
-
-  h3 {
-    margin: 0;
-    font-size: 18px;
-    color: #0f172a;
-  }
-
-  p {
-    margin: 6px 0 0;
-    font-size: 12px;
-    color: #64748b;
-  }
-`;
-
-const ProjectManagerForm = styled.form`
-  display: grid;
-  grid-template-columns: 1.2fr 1.8fr auto;
-  gap: 8px;
-  margin-bottom: 14px;
-
-  @media (max-width: 768px) {
-    grid-template-columns: 1fr;
-  }
-`;
-
-const ProjectManagerInput = styled.input`
-  border: 1px solid #cbd5e1;
-  border-radius: 9px;
-  padding: 10px 12px;
-  font-size: 13px;
-  color: #0f172a;
-  background: #fff;
-
-  &:focus {
-    outline: none;
-    border-color: #60a5fa;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.14);
-  }
-`;
-
-const ProjectManagerSubmit = styled.button`
-  border: 1px solid #93c5fd;
-  background: linear-gradient(135deg, #ffffff 0%, #eff6ff 100%);
-  color: #1e3a8a;
-  border-radius: 9px;
-  padding: 10px 12px;
-  font-size: 12px;
-  font-weight: 700;
+const MobileTaskCard = styled.button`
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--wp-border);
+  border-radius: var(--wp-radius-lg);
+  background: var(--wp-surface);
+  padding: 14px;
   cursor: pointer;
-`;
+  transition: border-color 0.15s, box-shadow 0.15s;
 
-const ProjectManagerList = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-height: 360px;
-  overflow-y: auto;
-`;
-
-const ProjectManagerItem = styled.div`
-  border: 1px solid ${(p) => (p.$active ? '#93c5fd' : '#e2e8f0')};
-  background: ${(p) => (p.$active ? '#eff6ff' : '#fff')};
-  border-radius: 10px;
-  padding: 10px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
+  &:hover {
+    border-color: var(--wp-border-strong);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  }
 
   .title {
-    font-size: 13px;
-    font-weight: 700;
-    color: #0f172a;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--wp-text);
+    margin: 0 0 8px 0;
+    line-height: 1.4;
   }
 
-  .desc {
-    font-size: 11px;
-    color: #64748b;
-    margin-top: 2px;
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+  }
+
+  .sub {
+    font-size: 12px;
+    color: var(--wp-text-muted);
+    margin: 0 0 8px 0;
+    line-height: 1.4;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
   }
 `;
 
-const ProjectManagerActions = styled.div`
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+/* ------------------------------------------------------------ page + toolbar */
+
+const Container = styled.div`
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 20px 16px;
+
+  @media (max-width: 768px) {
+    height: auto;
+    padding: 10px 12px 16px;
+  }
 `;
 
-const ProjectManagerAction = styled.button`
-  border: 1px solid #e2e8f0;
-  background: #fff;
-  color: ${(p) => (p.$danger ? '#dc2626' : '#475569')};
-  border-radius: 8px;
-  width: 32px;
-  height: 32px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-`;
-
-const ProjectSelectorWrap = styled.div`
-  display: inline-flex;
+const Toolbar = styled.div`
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 
-  @media (max-width: 768px) {
-    width: 100%;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 6px;
+  .spacer {
+    flex: 1;
   }
 `;
 
-const ProjectLabel = styled.span`
-  font-size: 11px;
-  font-weight: 700;
-  color: #2563eb;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+const Divider = styled.span`
+  width: 1px;
+  height: 20px;
+  background: var(--wp-border);
+
+  @media (max-width: 768px) {
+    display: none;
+  }
+`;
+
+const ToolbarButton = styled.button`
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: var(--wp-radius);
+  border: 1px solid var(--wp-border);
+  background: var(--wp-surface);
+  color: var(--wp-text-muted);
+  font-size: 13px;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--wp-text);
+    border-color: var(--wp-border-strong);
+    background: var(--wp-surface-2);
+  }
 `;
 
 const ProjectSelectShell = styled.div`
   position: relative;
-  min-width: 260px;
+  min-width: 220px;
+  max-width: 320px;
 
   @media (max-width: 768px) {
-    width: 100%;
+    flex: 1;
     min-width: 0;
+    max-width: none;
   }
 `;
 
 const ProjectSelectTrigger = styled.button`
   width: 100%;
-  border: 1px solid ${(props) => (props.$open ? '#60a5fa' : '#bfdbfe')};
-  border-radius: 10px;
-  padding: 10px 12px;
-  font-size: 12px;
-  font-weight: 600;
-  color: #0f172a;
-  background: #fff;
-  cursor: pointer;
-  box-shadow: ${(props) =>
-    props.$open ? '0 0 0 4px rgba(59, 130, 246, 0.14)' : '0 1px 2px rgba(15, 23, 42, 0.06)'};
+  height: 32px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
-  transition: all 0.18s ease;
+  padding: 0 10px;
+  border-radius: var(--wp-radius);
+  border: 1px solid ${(p) => (p.$open ? 'var(--wp-primary)' : 'var(--wp-input-border)')};
+  box-shadow: ${(p) => (p.$open ? '0 0 0 3px var(--wp-focus-ring)' : 'none')};
+  background: var(--wp-surface);
+  color: var(--wp-text);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+
+  .lead {
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+    flex-shrink: 0;
+  }
 
   .value {
+    flex: 1;
+    text-align: left;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
   .icon {
-    color: #64748b;
-    transform: ${(props) => (props.$open ? 'rotate(180deg)' : 'rotate(0deg)')};
-    transition: transform 0.16s ease;
+    color: var(--wp-text-subtle);
     flex-shrink: 0;
   }
 
-  &:hover {
-    border-color: #93c5fd;
-    box-shadow: 0 2px 6px rgba(30, 64, 175, 0.1);
+  &:hover:not(:disabled) {
+    border-color: ${(p) => (p.$open ? 'var(--wp-primary)' : 'var(--wp-border-strong)')};
   }
 
-  @media (max-width: 768px) {
-    font-size: 13px;
+  &:disabled {
+    cursor: default;
+    color: var(--wp-text-subtle);
   }
 `;
 
 const ProjectDropdownMenu = styled.div`
   position: absolute;
-  top: calc(100% + 8px);
+  top: calc(100% + 4px);
   left: 0;
-  right: 0;
-  z-index: 25;
-  background: #fff;
-  border: 1px solid #bfdbfe;
-  border-radius: 12px;
-  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.16);
-  padding: 6px;
-  max-height: 260px;
+  min-width: 100%;
+  max-height: 320px;
   overflow-y: auto;
+  z-index: 50;
+  padding: 4px;
+  background: var(--wp-surface-elevated);
+  border: 1px solid var(--wp-border);
+  border-radius: var(--wp-radius-lg);
+  box-shadow: var(--wp-shadow-lg);
 `;
 
 const ProjectDropdownItem = styled.button`
   width: 100%;
-  border: none;
-  background: ${(props) => (props.$active ? '#dbeafe' : 'transparent')};
-  color: ${(props) => (props.$active ? '#1d4ed8' : '#0f172a')};
-  border-radius: 8px;
-  padding: 10px 10px;
-  font-size: 13px;
-  font-weight: ${(props) => (props.$active ? 700 : 600)};
-  text-align: left;
-  cursor: pointer;
+  height: 32px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  padding: 0 10px;
+  border: none;
+  border-radius: var(--wp-radius-sm);
+  background: ${(p) => (p.$active ? 'var(--wp-primary-muted)' : 'transparent')};
+  color: ${(p) => (p.$active ? 'var(--wp-primary)' : 'var(--wp-text)')};
+  font-size: 13px;
+  font-weight: ${(p) => (p.$active ? 600 : 500)};
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
 
   &:hover {
-    background: ${(props) => (props.$active ? '#dbeafe' : '#f1f5f9')};
+    background: ${(p) => (p.$active ? 'var(--wp-primary-muted)' : 'var(--wp-hover)')};
   }
-`;
 
-const HeaderLeft = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 12px;
-
-  @media (max-width: 768px) {
-    flex-direction: column;
-    align-items: stretch;
+  .name {
+    display: inline-flex;
+    align-items: center;
     gap: 8px;
   }
+
+  .swatch {
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+  }
 `;
 
-const ProjectsTabButton = styled.button`
-  border: 1px solid ${(p) => (p.$active ? '#93c5fd' : '#bfdbfe')};
-  background: ${(p) =>
-    p.$active
-      ? 'linear-gradient(135deg, #ffffff 0%, #dbeafe 100%)'
-      : 'linear-gradient(135deg, #ffffff 0%, #eff6ff 100%)'};
-  color: ${(p) => (p.$active ? '#1d4ed8' : '#1e3a8a')};
-  border-radius: 8px;
-  padding: 9px 12px;
-  font-size: 12px;
-  font-weight: 700;
+const SearchField = styled.div`
+  position: relative;
+  width: 240px;
+
+  > svg {
+    position: absolute;
+    left: 9px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--wp-text-subtle);
+    pointer-events: none;
+  }
+
+  kbd {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    height: 18px;
+    padding: 0 5px;
+    display: inline-flex;
+    align-items: center;
+    border-radius: 4px;
+    border: 1px solid var(--wp-border);
+    background: var(--wp-surface-2);
+    color: var(--wp-text-subtle);
+    font-family: var(--wp-font-mono);
+    font-size: 10px;
+    pointer-events: none;
+  }
+
+  @media (max-width: 768px) {
+    width: 100%;
+    order: 10;
+  }
+`;
+
+const SearchInput = styled.input`
+  width: 100%;
+  height: 32px;
+  padding: 0 28px 0 30px;
+  border-radius: var(--wp-radius);
+  border: 1px solid var(--wp-input-border);
+  background: var(--wp-input-bg);
+  color: var(--wp-text);
+  font-size: 13px;
+
+  &::placeholder {
+    color: var(--wp-input-placeholder);
+  }
+
+  &:focus {
+    outline: none;
+    border-color: var(--wp-primary);
+    box-shadow: 0 0 0 3px var(--wp-focus-ring);
+  }
+`;
+
+const Segmented = styled.div`
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  max-width: 100%;
+  overflow-x: auto;
+  border-radius: var(--wp-radius);
+  border: 1px solid var(--wp-border);
+  background: var(--wp-surface-2);
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+`;
+
+const SegmentButton = styled.button`
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  cursor: pointer;
-  box-shadow: ${(p) =>
-    p.$active ? '0 4px 10px rgba(37, 99, 235, 0.2)' : '0 2px 6px rgba(37, 99, 235, 0.12)'};
-  transition: all 0.2s ease;
-
-  &:hover {
-    border-color: #60a5fa;
-    color: #1d4ed8;
-    background: linear-gradient(135deg, #ffffff 0%, #dbeafe 100%);
-    transform: translateY(-1px);
-  }
-
-  @media (max-width: 768px) {
-    width: 100%;
-    justify-content: center;
-  }
-`;
-
-const ViewModeToggle = styled.div`
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px;
-  border: 1px solid #bfdbfe;
-  border-radius: 11px;
-  background: linear-gradient(135deg, #ffffff 0%, #eff6ff 100%);
-  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.14);
-`;
-
-const ViewModeButton = styled.button`
-  width: 34px;
-  height: 34px;
+  height: 26px;
+  padding: 0 9px;
   border: none;
-  border-radius: 8px;
-  background: ${(p) => (p.$active ? '#ffffff' : 'transparent')};
-  color: ${(p) => (p.$active ? '#1d4ed8' : '#64748b')};
+  border-radius: var(--wp-radius-sm);
+  background: ${(p) => (p.$active ? 'var(--wp-surface)' : 'transparent')};
+  box-shadow: ${(p) => (p.$active ? 'var(--wp-shadow-sm)' : 'none')};
+  color: ${(p) => (p.$active ? 'var(--wp-text)' : 'var(--wp-text-muted)')};
+  font-size: 12px;
+  font-weight: ${(p) => (p.$active ? 600 : 500)};
+  white-space: nowrap;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--wp-text);
+  }
+
+  .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+  }
+
+  .n {
+    font-family: var(--wp-font-mono);
+    font-size: 11px;
+    color: var(--wp-text-subtle);
+  }
+`;
+
+const Summary = styled.div`
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: all 0.18s ease;
-  box-shadow: ${(p) => (p.$active ? '0 2px 8px rgba(15, 23, 42, 0.12)' : 'none')};
+  gap: 10px;
+  font-size: 12px;
+  color: var(--wp-text-muted);
+  white-space: nowrap;
 
-  &:hover {
-    color: #1d4ed8;
-    background: ${(p) => (p.$active ? '#ffffff' : '#eff6ff')};
+  .overdue {
+    color: var(--wp-error);
+    font-weight: 600;
+  }
+
+  .bar {
+    width: 72px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--wp-surface-3);
+    overflow: hidden;
+
+    span {
+      display: block;
+      height: 100%;
+      background: var(--wp-success);
+    }
+  }
+
+  @media (max-width: 1100px) {
+    .bar {
+      display: none;
+    }
   }
 `;
 
-const CalendarShell = styled.div`
-  border: 1px solid #e2e8f0;
-  border-radius: 14px;
-  background: #fff;
-  padding: 12px;
+const ViewModeToggle = styled(Segmented)``;
+
+const ViewModeButton = styled(SegmentButton)`
+  width: 30px;
+  padding: 0;
+  justify-content: center;
 `;
 
-const CalendarToolbarHint = styled.div`
+/* --------------------------------------------------------------- kanban */
+
+const KanbanBoard = styled.div`
+  flex: 1;
+  min-height: 0;
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin: 0 0 10px;
-  color: #64748b;
-  font-size: 12px;
+  align-items: stretch;
+  gap: 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 4px;
+
+  @media (max-width: 768px) {
+    min-height: 72vh;
+    scroll-snap-type: x mandatory;
+  }
 `;
 
-const PageTitle = styled.h2`
-  font-size: 18px;
-  font-weight: 700;
-  color: #0f172a;
+const KanbanColumn = styled.section`
+  flex: 1 0 280px;
+  max-width: 380px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--wp-surface-2);
+  border: 1px solid var(--wp-border);
+  border-radius: var(--wp-radius-lg);
+
+  @media (max-width: 768px) {
+    flex: 0 0 86vw;
+    max-width: none;
+    scroll-snap-align: start;
+  }
+`;
+
+const ColumnHeader = styled.header`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 8px 0 12px;
+  border-bottom: 1px solid var(--wp-border);
+  flex-shrink: 0;
+`;
+
+const ColumnTitle = styled.h3`
+  flex: 1;
+  min-width: 0;
   margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--wp-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 
-  @media (max-width: 768px) {
-    font-size: 16px;
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
   }
 `;
 
-const AddTaskButton = styled.button`
-  border: 1px solid #bfdbfe;
-  background: linear-gradient(135deg, #ffffff 0%, #eff6ff 100%);
-  color: #1e40af;
-  padding: 9px 12px;
-  border-radius: 9px;
-  font-size: 12px;
-  font-weight: 700;
+const ColumnCount = styled.span`
+  min-width: 22px;
+  height: 20px;
+  padding: 0 6px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: var(--wp-radius-lg);
+  background: var(--wp-surface-3);
+  color: var(--wp-text-muted);
+  font-family: var(--wp-font-mono);
+  font-size: 11px;
+`;
+
+const ColumnAddButton = styled.button`
+  width: 26px;
+  height: 26px;
+  display: inline-grid;
+  place-items: center;
+  border: none;
+  border-radius: var(--wp-radius-sm);
+  background: transparent;
+  color: var(--wp-text-subtle);
   cursor: pointer;
-  transition: all 0.2s ease;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.12);
 
   &:hover {
-    transform: translateY(-1px);
-    border-color: #60a5fa;
-    color: #1d4ed8;
-    background: linear-gradient(135deg, #ffffff 0%, #dbeafe 100%);
-    box-shadow: 0 4px 10px rgba(37, 99, 235, 0.2);
+    background: var(--wp-hover);
+    color: var(--wp-text);
+  }
+`;
+
+const ColumnTasks = styled.div`
+  flex: 1;
+  min-height: 48px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  transition: background-color 0.12s ease;
+
+  &[data-over='true'] {
+    background: var(--wp-primary-muted);
+  }
+`;
+
+const ColumnEmpty = styled.div`
+  padding: 18px 8px;
+  border: 1px dashed var(--wp-border-strong);
+  border-radius: var(--wp-radius);
+  text-align: center;
+  font-size: 12px;
+  color: var(--wp-text-subtle);
+`;
+
+const KanbanTask = styled.article`
+  position: relative;
+  padding: 10px 12px;
+  background: var(--wp-surface);
+  border: 1px solid var(--wp-border);
+  border-radius: var(--wp-radius);
+  box-shadow: var(--wp-shadow-sm);
+  cursor: pointer;
+
+  &:hover {
+    border-color: var(--wp-border-strong);
   }
 
-  &:disabled {
-    opacity: 0.65;
-    cursor: not-allowed;
-    transform: none;
-    box-shadow: none;
+  &:hover .card-actions,
+  &:focus-within .card-actions {
+    opacity: 1;
+    pointer-events: auto;
   }
 
-  @media (max-width: 768px) {
-    width: 100%;
+  &:focus-visible {
+    outline: 2px solid var(--wp-primary);
+    outline-offset: 1px;
+  }
+
+  &[data-dragging='true'] {
+    border-color: var(--wp-primary-border);
+    box-shadow: var(--wp-shadow-lg);
   }
 `;
 
 const ColumnQuickAddWrap = styled.div`
-  margin-top: 8px;
+  padding: 6px 8px 8px;
+  flex-shrink: 0;
 `;
 
 const ColumnQuickAddTrigger = styled.button`
   width: 100%;
-  border: 1px dashed #cbd5e1;
-  background: #fff;
-  color: #475569;
-  border-radius: 8px;
-  padding: 8px 10px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--wp-radius);
+  background: transparent;
+  color: var(--wp-text-subtle);
   font-size: 12px;
-  font-weight: 600;
   cursor: pointer;
-  text-align: left;
-  transition: all 0.15s ease;
 
   &:hover {
-    border-color: #93c5fd;
-    color: #1d4ed8;
-    background: #eff6ff;
+    background: var(--wp-hover);
+    color: var(--wp-text);
   }
 `;
 
@@ -1091,349 +641,215 @@ const ColumnQuickAddForm = styled.form`
   display: flex;
   flex-direction: column;
   gap: 8px;
-  background: #fff;
-  border: 1px solid #dbeafe;
-  border-radius: 9px;
-  padding: 9px;
+  padding: 8px;
+  background: var(--wp-surface);
+  border: 1px solid var(--wp-primary-border);
+  border-radius: var(--wp-radius);
+  box-shadow: var(--wp-shadow-sm);
 `;
 
 const ColumnQuickAddInput = styled.input`
   width: 100%;
-  box-sizing: border-box;
-  border: 1px solid #cbd5e1;
-  border-radius: 7px;
-  padding: 8px 9px;
-  font-size: 12px;
-  color: #0f172a;
+  height: 32px;
+  padding: 0 9px;
+  border: 1px solid var(--wp-input-border);
+  border-radius: var(--wp-radius-sm);
+  background: var(--wp-input-bg);
+  color: var(--wp-text);
+  font-size: 13px;
 
   &:focus {
     outline: none;
-    border-color: #3b82f6;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+    border-color: var(--wp-primary);
+    box-shadow: 0 0 0 3px var(--wp-focus-ring);
   }
+
+  &:disabled {
+    opacity: 0.6;
+  }
+`;
+
+const ColumnQuickAddToolbar = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+`;
+
+const ColumnQuickAddImageHint = styled.span`
+  font-size: 11px;
+  color: var(--wp-text-subtle);
 `;
 
 const ColumnQuickAddActions = styled.div`
   display: flex;
   justify-content: flex-end;
+  align-items: center;
   gap: 6px;
+
+  .hint {
+    margin-right: auto;
+    font-size: 11px;
+    color: var(--wp-text-subtle);
+  }
 `;
 
 const ColumnQuickAddAction = styled.button`
-  border: none;
-  border-radius: 7px;
-  padding: 6px 9px;
-  font-size: 11px;
+  height: 28px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: var(--wp-radius-sm);
+  border: 1px solid ${(p) => (p.$primary ? 'var(--wp-primary)' : 'var(--wp-border)')};
+  background: ${(p) => (p.$primary ? 'var(--wp-primary)' : 'var(--wp-surface)')};
+  color: ${(p) => (p.$primary ? 'var(--wp-on-primary)' : 'var(--wp-text-muted)')};
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  background: ${(p) => (p.$primary ? '#2563eb' : '#f1f5f9')};
-  color: ${(p) => (p.$primary ? '#fff' : '#334155')};
+
+  &:hover:not(:disabled) {
+    background: ${(p) => (p.$primary ? 'var(--wp-primary-hover)' : 'var(--wp-surface-2)')};
+  }
 
   &:disabled {
-    opacity: 0.7;
+    opacity: 0.6;
     cursor: not-allowed;
   }
 `;
 
-const Filters = styled.div`
-  display: flex;
-  gap: 8px;
-  margin-bottom: 14px;
-  flex-wrap: wrap;
-  align-items: center;
-  padding-bottom: 12px;
-  border-bottom: 1px solid #e2e8f0;
-`;
+/* ------------------------------------------------------------- list view */
 
-const FilterButton = styled.button`
-  padding: 8px 12px;
-  border: 2px solid ${props => props.active ? '#3b82f6' : '#e2e8f0'};
-  border-radius: 8px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  background: ${props => props.active ? '#3b82f6' : 'white'};
-  color: ${props => props.active ? 'white' : '#64748b'};
+const LIST_COLUMNS = 'minmax(280px, 1fr) 150px 100px 140px 110px 230px';
 
-  &:hover {
-    border-color: #3b82f6;
-    background: ${props => props.active ? '#2563eb' : '#f8fafc'};
-    color: ${props => props.active ? 'white' : '#3b82f6'};
-  }
-`;
-
-const SearchInput = styled.input`
-  padding: 10px 16px;
-  border: 2px solid #e2e8f0;
-  border-radius: 10px;
-  font-size: 13px;
-  width: 240px;
-  background: #fafbfc;
-  color: #0f172a;
-  transition: all 0.2s ease;
-
-  &:focus {
-    outline: none;
-    border-color: #3b82f6;
-    box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
-    background: white;
-  }
-
-  &::placeholder {
-    color: #94a3b8;
-  }
-`;
-
-const TaskList = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-`;
-
-const TaskItem = styled.div`
-  display: flex;
-  justify-content: space-between;
-  align-items: start;
-  background: ${props => props.completed ? '#f0fdf4' : 'white'};
-  padding: 20px 24px;
-  border-radius: 12px;
-  border: 2px solid ${props => props.completed ? '#d1fae5' : '#e8ecf0'};
-  border-left: 5px solid ${props => {
-    if (props.completed) return '#10b981';
-    if (props.priority === 'urgent') return '#ef4444';
-    if (props.priority === 'high') return '#f59e0b';
-    if (props.priority === 'medium') return '#3b82f6';
-    return '#94a3b8';
-  }};
-  transition: all 0.2s ease;
-  gap: 20px;
-
-  &:hover {
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
-    border-color: ${props => props.completed ? '#d1fae5' : '#cbd5e1'};
-    transform: translateY(-2px);
-  }
-
-  ${props => props.completed && `
-    background: #f0fdf4;
-  `}
-`;
-
-const TaskContent = styled.div`
-  display: flex;
-  align-items: start;
-  gap: 16px;
+const ListViewShell = styled.div`
   flex: 1;
-  min-width: 0;
-`;
+  min-height: 0;
+  overflow: auto;
+  background: var(--wp-surface);
+  border: 1px solid var(--wp-border);
+  border-radius: var(--wp-radius-lg);
 
-const Checkbox = styled.input`
-  width: 18px;
-  height: 18px;
-  cursor: pointer;
-  accent-color: #10b981;
-  margin-top: 2px;
-`;
-
-const TaskText = styled.div`
-  flex: 1;
-  min-width: 0;
-`;
-
-const TaskTitle = styled.div`
-  font-size: 17px;
-  color: #0f172a;
-  font-weight: 700;
-  cursor: pointer;
-  margin-bottom: 8px;
-  line-height: 1.4;
-  word-break: break-word;
-  text-decoration: ${props => props.completed ? 'line-through' : 'none'};
-  opacity: ${props => props.completed ? 0.5 : 1};
-  letter-spacing: -0.2px;
-`;
-
-const TaskDescription = styled.div`
-  font-size: 14px;
-  color: #475569;
-  margin-bottom: 12px;
-  line-height: 1.6;
-  word-break: break-word;
-  padding-left: 12px;
-  border-left: 3px solid #e2e8f0;
-  
-  * {
-    max-width: 100%;
-    color: inherit;
-  }
-  
-  p {
-    margin: 4px 0;
-  }
-  
-  img {
-    max-width: 100%;
-    height: auto;
-    border-radius: 8px;
-    margin: 8px 0;
-  }
-  
-  ul, ol {
-    padding-left: 20px;
-    margin: 4px 0;
+  @media (max-width: 768px) {
+    display: none;
   }
 `;
 
-const TaskMeta = styled.div`
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  flex-wrap: wrap;
-  padding-top: 8px;
-  border-top: 1px solid #e8ecf0;
-`;
-
-const TaskBadge = styled.span`
-  font-size: 11px;
-  padding: 4px 10px;
-  border-radius: 6px;
-  font-weight: 600;
-  background: ${props => {
-    if (props.type === 'priority') {
-      if (props.value === 'urgent') return '#fee2e2';
-      if (props.value === 'high') return '#fef3c7';
-      if (props.value === 'medium') return '#dbeafe';
-      return '#f1f5f9';
-    }
-    if (props.type === 'status') {
-      if (props.value === 'completed') return '#d1fae5';
-      if (props.value === 'in-progress') return '#bfdbfe';
-      if (props.value === 'pending') return '#f3f4f6';
-    }
-    return '#f1f5f9';
-  }};
-  color: ${props => {
-    if (props.type === 'priority') {
-      if (props.value === 'urgent') return '#991b1b';
-      if (props.value === 'high') return '#92400e';
-      if (props.value === 'medium') return '#1e40af';
-      return '#475569';
-    }
-    if (props.type === 'status') {
-      if (props.value === 'completed') return '#065f46';
-      if (props.value === 'in-progress') return '#1e40af';
-      if (props.value === 'pending') return '#4b5563';
-    }
-    return '#475569';
-  }};
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-`;
-
-const TaskActions = styled.div`
-  display: flex;
-  gap: 8px;
-  align-items: center;
-`;
-
-const IconButton = styled.button`
-  background: none;
-  border: 1.5px solid #e2e8f0;
-  padding: 6px 14px;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  color: #64748b;
-  font-size: 12px;
-  font-weight: 600;
-
-  &:hover {
-    border-color: ${props => props.danger ? '#ef4444' : props.edit ? '#3b82f6' : '#94a3b8'};
-    color: ${props => props.danger ? '#ef4444' : props.edit ? '#3b82f6' : '#64748b'};
-    background: ${props => props.danger ? '#fee2e2' : props.edit ? '#eff6ff' : '#fafbfc'};
-  }
-`;
-
-const Modal = styled.div`
-  position: fixed;
+const ListHeaderRow = styled.div`
+  position: sticky;
   top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(4px);
-  display: flex;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: ${LIST_COLUMNS};
+  min-width: 1010px;
+  gap: 12px;
   align-items: center;
-  justify-content: center;
-  z-index: 1000;
-  padding: 20px;
-
-  @media (max-width: 768px) {
-    padding: 10px;
-  }
+  height: 34px;
+  padding: 0 14px;
+  background: var(--wp-surface-2);
+  border-bottom: 1px solid var(--wp-border);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--wp-text-subtle);
 `;
 
-const ModalContent = styled.div`
-  background: white;
-  border-radius: 24px;
-  padding: 40px;
-  max-width: 800px;
-  width: 100%;
-  max-height: 90vh;
-  overflow-y: auto;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-  position: relative;
-
-  @media (max-width: 768px) {
-    border-radius: 14px;
-    padding: 16px;
-    max-height: 92vh;
-  }
-`;
-
-const ModalHeader = styled.div`
-  display: flex;
-  justify-content: space-between;
+const ListRow = styled.div`
+  display: grid;
+  grid-template-columns: ${LIST_COLUMNS};
+  min-width: 1010px;
+  gap: 12px;
   align-items: center;
-  margin-bottom: 32px;
-  
-  h2 {
-    font-size: 28px;
-    font-weight: 700;
-    color: #0f172a;
-    margin: 0;
-    letter-spacing: -0.5px;
-  }
-
-  @media (max-width: 768px) {
-    margin-bottom: 16px;
-
-    h2 {
-      font-size: 20px;
-      letter-spacing: -0.2px;
-    }
-  }
-`;
-
-const CloseButton = styled.button`
-  background: none;
-  border: none;
-  font-size: 32px;
+  min-height: 48px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--wp-border-subtle);
   cursor: pointer;
-  color: #64748b;
-  padding: 0;
-  width: 40px;
-  height: 40px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 12px;
-  transition: all 0.2s ease;
-  
+
   &:hover {
-    background: #f1f5f9;
-    color: #0f172a;
+    background: var(--wp-surface-2);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--wp-primary);
+    outline-offset: -2px;
+  }
+
+  > div {
+    min-width: 0;
+  }
+
+  .muted {
+    font-size: 12px;
+    color: var(--wp-text-subtle);
+  }
+`;
+
+const ListTaskTitle = styled.div`
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--wp-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+`;
+
+const ListTaskSub = styled.div`
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--wp-text-subtle);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+`;
+
+/* ----------------------------------------------------------------- empty */
+
+const EmptyState = styled.div`
+  text-align: center;
+  padding: 48px 24px;
+  border: 1px dashed var(--wp-border-strong);
+  border-radius: var(--wp-radius-lg);
+  background: var(--wp-surface);
+  color: var(--wp-text-muted);
+
+  h3 {
+    margin: 0 0 6px;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--wp-text);
+  }
+
+  p {
+    margin: 0 auto;
+    max-width: 420px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--wp-text-subtle);
+  }
+
+  button {
+    margin-top: 16px;
+  }
+`;
+
+const EmptyAction = styled.button`
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: var(--wp-radius);
+  border: 1px solid var(--wp-primary);
+  background: var(--wp-primary);
+  color: var(--wp-on-primary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--wp-primary-hover);
   }
 `;
 
@@ -1454,71 +870,71 @@ const FormGroup = styled.div`
   
   label {
     font-weight: 600;
-    color: #334155;
+    color: var(--wp-text);
     font-size: 15px;
   }
   
   input {
     padding: 16px 20px;
-    border: 2px solid #e2e8f0;
-    border-radius: 14px;
+    border: 2px solid var(--wp-border);
+    border-radius: var(--wp-radius-lg);
     font-size: 15px;
     transition: all 0.2s ease;
-    background: #fafbfc;
-    color: #0f172a;
+    background: var(--wp-bg);
+    color: var(--wp-text);
     font-family: inherit;
     
     &:focus {
       outline: none;
-      border-color: #3b82f6;
-      background: white;
+      border-color: var(--wp-primary);
+      background: var(--wp-surface);
       box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
     }
     
     &::placeholder {
-      color: #94a3b8;
+      color: var(--wp-text-subtle);
     }
   }
 
   textarea {
     padding: 14px 16px;
-    border: 2px solid #e2e8f0;
-    border-radius: 12px;
+    border: 2px solid var(--wp-border);
+    border-radius: var(--wp-radius-lg);
     font-size: 14px;
     transition: all 0.2s ease;
-    background: #fafbfc;
-    color: #0f172a;
+    background: var(--wp-bg);
+    color: var(--wp-text);
     font-family: inherit;
     resize: vertical;
     min-height: 96px;
 
     &:focus {
       outline: none;
-      border-color: #3b82f6;
-      background: white;
+      border-color: var(--wp-primary);
+      background: var(--wp-surface);
       box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
     }
   }
 `;
 
 const RichTextContainer = styled.div`
-  border: 2px solid #e2e8f0;
-  border-radius: 14px;
+  border: 2px solid var(--wp-border);
+  border-radius: var(--wp-radius-lg);
   overflow: visible;
   transition: all 0.2s ease;
-  background: white;
+  background: var(--wp-surface);
   position: relative;
   z-index: 1;
   
   &:focus-within {
-    border-color: #3b82f6;
+    border-color: var(--wp-primary);
     box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
   }
   
   .ql-toolbar {
     border: none;
-    border-bottom: 2px solid #e2e8f0;
-    background: #fafbfc;
+    border-bottom: 2px solid var(--wp-border);
+    background: var(--wp-bg);
     padding: 12px 16px;
     border-radius: 12px 12px 0 0;
   }
@@ -1536,7 +952,7 @@ const RichTextContainer = styled.div`
     padding: 16px;
     
     &.ql-blank::before {
-      color: #94a3b8;
+      color: var(--wp-text-subtle);
       font-style: normal;
     }
   }
@@ -1550,26 +966,26 @@ const AddDescriptionTextarea = styled.textarea`
   width: 100%;
   box-sizing: border-box;
   padding: 14px 16px;
-  border: 2px solid #e2e8f0;
-  border-radius: 14px;
+  border: 2px solid var(--wp-border);
+  border-radius: var(--wp-radius-lg);
   font-size: 14px;
   line-height: 1.55;
   min-height: 140px;
   resize: vertical;
   font-family: inherit;
-  background: #fafbfc;
-  color: #0f172a;
+  background: var(--wp-bg);
+  color: var(--wp-text);
   transition: all 0.2s ease;
 
   &:focus {
     outline: none;
-    border-color: #3b82f6;
-    background: #fff;
+    border-color: var(--wp-primary);
+    background: var(--wp-surface);
     box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
   }
 
   &::placeholder {
-    color: #94a3b8;
+    color: var(--wp-text-subtle);
   }
 `;
 
@@ -1580,19 +996,18 @@ const ImageUploadOverlay = styled.div`
   right: 0;
   bottom: 0;
   background: rgba(255, 255, 255, 0.9);
-  backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 10;
-  border-radius: 14px;
+  border-radius: var(--wp-radius-lg);
 `;
 
 const LoaderSpinner = styled.div`
   width: 40px;
   height: 40px;
-  border: 4px solid #e2e8f0;
-  border-top-color: #3b82f6;
+  border: 4px solid var(--wp-border);
+  border-top-color: var(--wp-primary);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
   
@@ -1605,7 +1020,7 @@ const LoaderText = styled.div`
   margin-top: 12px;
   font-size: 14px;
   font-weight: 600;
-  color: #475569;
+  color: var(--wp-text-muted);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1621,7 +1036,6 @@ const ModalLoaderOverlay = styled.div`
   position: absolute;
   inset: 0;
   background: rgba(255, 255, 255, 0.8);
-  backdrop-filter: blur(2px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1632,7 +1046,7 @@ const InlineSpinner = styled.div`
   width: 16px;
   height: 16px;
   border: 3px solid rgba(255, 255, 255, 0.6);
-  border-top-color: white;
+  border-top-color: var(--wp-on-primary);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 
@@ -1643,28 +1057,14 @@ const InlineSpinner = styled.div`
   }
 `;
 
-const TaskPreviewContent = styled.div`
-  font-size: 14px;
-  line-height: 1.6;
-  color: #334155;
-  
-  img {
-    max-width: 100%;
-    height: auto;
-    border-radius: 8px;
-    margin: 12px 0;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  }
-`;
-
 const PrioritySection = styled.div`
   display: flex;
   align-items: center;
   gap: 16px;
   padding: 20px;
-  background: #fafbfc;
-  border-radius: 14px;
-  border: 2px solid #e8ecf0;
+  background: var(--wp-bg);
+  border-radius: var(--wp-radius-lg);
+  border: 2px solid var(--wp-border);
 
   @media (max-width: 768px) {
     flex-direction: column;
@@ -1677,7 +1077,7 @@ const PrioritySection = styled.div`
 const PriorityLabel = styled.label`
   font-size: 14px;
   font-weight: 600;
-  color: #475569;
+  color: var(--wp-text-muted);
   white-space: nowrap;
 `;
 
@@ -1696,14 +1096,14 @@ const PriorityButtons = styled.div`
 const PriorityButton = styled.button`
   flex: 1;
   padding: 12px 16px;
-  border: 2px solid ${props => props.active ? props.borderColor : '#e2e8f0'};
-  border-radius: 12px;
+  border: 2px solid ${props => props.active ? props.borderColor : 'var(--wp-border)'};
+  border-radius: var(--wp-radius-lg);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
-  background: ${props => props.active ? props.bgColor : 'white'};
-  color: ${props => props.active ? props.textColor : '#64748b'};
+  background: ${props => props.active ? props.bgColor : 'var(--wp-surface)'};
+  color: ${props => props.active ? props.textColor : 'var(--wp-text-muted)'};
   position: relative;
 
   &:hover {
@@ -1722,9 +1122,9 @@ const StatusSection = styled.div`
   align-items: center;
   gap: 16px;
   padding: 20px;
-  background: #fafbfc;
-  border-radius: 14px;
-  border: 2px solid #e8ecf0;
+  background: var(--wp-bg);
+  border-radius: var(--wp-radius-lg);
+  border: 2px solid var(--wp-border);
 
   @media (max-width: 768px) {
     flex-direction: column;
@@ -1737,7 +1137,7 @@ const StatusSection = styled.div`
 const StatusLabel = styled.label`
   font-size: 14px;
   font-weight: 600;
-  color: #475569;
+  color: var(--wp-text-muted);
   white-space: nowrap;
 `;
 
@@ -1756,8 +1156,8 @@ const StatusButtons = styled.div`
 const StatusButton = styled.button`
   flex: 1;
   padding: 12px 16px;
-  border: 2px solid #e2e8f0;
-  border-radius: 12px;
+  border: 2px solid var(--wp-border);
+  border-radius: var(--wp-radius-lg);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
@@ -1766,9 +1166,9 @@ const StatusButton = styled.button`
   
   ${props => {
     const colors = {
-      pending: { bg: '#f9fafb', border: '#e5e7eb', text: '#4b5563' },
-      'in-progress': { bg: '#eff6ff', border: '#bfdbfe', text: '#1e40af' },
-      completed: { bg: '#d1fae5', border: '#a7f3d0', text: '#065f46' }
+      pending: { bg: 'var(--wp-surface-2)', border: 'var(--wp-border)', text: 'var(--wp-text-muted)' },
+      'in-progress': { bg: 'var(--wp-info-bg)', border: 'var(--wp-info-border)', text: 'var(--wp-info)' },
+      completed: { bg: 'var(--wp-success-bg)', border: 'var(--wp-success-border)', text: 'var(--wp-success)' }
     };
     const c = colors[props.value];
     
@@ -1778,8 +1178,8 @@ const StatusButton = styled.button`
       border-color: ${c.border};
       box-shadow: 0 2px 8px ${c.bg}40;
     ` : `
-      background: white;
-      color: #94a3b8;
+      background: var(--wp-surface);
+      color: var(--wp-text-subtle);
       
       &:hover {
         background: ${c.bg};
@@ -1790,82 +1190,13 @@ const StatusButton = styled.button`
   }}
 `;
 
-const ModalActions = styled.div`
-  display: flex;
-  gap: 16px;
-  justify-content: flex-end;
-  margin-top: 16px;
-  padding-top: 24px;
-  border-top: 2px solid #f1f5f9;
-`;
-
-const ModalButton = styled.button`
-  padding: 14px 32px;
-  border-radius: 12px;
-  font-size: 15px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  border: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  
-  &.primary {
-    background: linear-gradient(135deg, #3b82f6, #2563eb);
-    color: white;
-    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2);
-    
-    &:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 6px 16px rgba(59, 130, 246, 0.3);
-    }
-  }
-  
-  &.secondary {
-    background: #f1f5f9;
-    color: #334155;
-    
-    &:hover {
-      background: #e2e8f0;
-    }
-  }
-
-  &:disabled {
-    opacity: 0.7;
-    cursor: not-allowed;
-    box-shadow: none;
-  }
-`;
-
-const EmptyState = styled.div`
-  text-align: center;
-  padding: 60px 24px;
-  color: #64748b;
-  
-  h3 {
-    font-size: 18px;
-    margin: 0 0 8px 0;
-    color: #475569;
-    font-weight: 700;
-  }
-  
-  p {
-    margin: 0;
-    font-size: 14px;
-    color: #94a3b8;
-  }
-`;
-
 const DeleteModal = styled.div`
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(4px);
+  background: var(--wp-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1874,12 +1205,12 @@ const DeleteModal = styled.div`
 `;
 
 const DeleteModalContent = styled.div`
-  background: white;
-  border-radius: 20px;
+  background: var(--wp-surface);
+  border-radius: var(--wp-radius-lg);
   padding: 32px;
   max-width: 480px;
   width: 100%;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--wp-shadow-xl);
   position: relative;
   animation: slideIn 0.2s ease-out;
   
@@ -1904,15 +1235,15 @@ const DeleteModalHeader = styled.div`
   .icon-wrapper {
     width: 56px;
     height: 56px;
-    border-radius: 14px;
-    background: #fef2f2;
+    border-radius: var(--wp-radius-lg);
+    background: var(--wp-error-bg);
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
     
     svg {
-      color: #ef4444;
+      color: var(--wp-error);
       width: 28px;
       height: 28px;
     }
@@ -1921,7 +1252,7 @@ const DeleteModalHeader = styled.div`
   h3 {
     font-size: 22px;
     font-weight: 700;
-    color: #0f172a;
+    color: var(--wp-text);
     margin: 0;
     flex: 1;
   }
@@ -1932,18 +1263,18 @@ const DeleteModalBody = styled.div`
   
   p {
     font-size: 15px;
-    color: #475569;
+    color: var(--wp-text-muted);
     line-height: 1.6;
     margin: 0 0 12px 0;
   }
   
   .task-title {
-    background: #f8fafc;
+    background: var(--wp-surface-2);
     padding: 12px 16px;
-    border-radius: 10px;
-    border: 1px solid #e2e8f0;
+    border-radius: var(--wp-radius-lg);
+    border: 1px solid var(--wp-border);
     font-weight: 600;
-    color: #0f172a;
+    color: var(--wp-text);
     font-size: 14px;
     margin-top: 12px;
   }
@@ -1957,7 +1288,7 @@ const DeleteModalActions = styled.div`
 
 const DeleteModalButton = styled.button`
   padding: 12px 24px;
-  border-radius: 10px;
+  border-radius: var(--wp-radius-lg);
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
@@ -1969,22 +1300,21 @@ const DeleteModalButton = styled.button`
   gap: 8px;
   
   &.cancel {
-    background: #f1f5f9;
-    color: #475569;
+    background: var(--wp-surface-2);
+    color: var(--wp-text-muted);
     
     &:hover {
-      background: #e2e8f0;
-      color: #334155;
+      background: var(--wp-border);
+      color: var(--wp-text);
     }
   }
   
   &.confirm {
-    background: linear-gradient(135deg, #ef4444, #dc2626);
-    color: white;
+    background: var(--wp-error);
+    color: var(--wp-on-primary);
     box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
     
     &:hover {
-      transform: translateY(-1px);
       box-shadow: 0 6px 16px rgba(239, 68, 68, 0.4);
     }
     
@@ -2010,8 +1340,7 @@ const AssignModal = styled.div`
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(4px);
+  background: var(--wp-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2020,12 +1349,12 @@ const AssignModal = styled.div`
 `;
 
 const AssignModalContent = styled.div`
-  background: white;
-  border-radius: 20px;
+  background: var(--wp-surface);
+  border-radius: var(--wp-radius-lg);
   padding: 32px;
   max-width: 520px;
   width: 100%;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--wp-shadow-xl);
   position: relative;
   animation: slideIn 0.2s ease-out;
   
@@ -2050,15 +1379,15 @@ const AssignModalHeader = styled.div`
   .icon-wrapper {
     width: 56px;
     height: 56px;
-    border-radius: 14px;
-    background: #f3e8ff;
+    border-radius: var(--wp-radius-lg);
+    background: var(--wp-primary-muted);
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
     
     svg {
-      color: #7c3aed;
+      color: var(--wp-primary);
       width: 28px;
       height: 28px;
     }
@@ -2067,7 +1396,7 @@ const AssignModalHeader = styled.div`
   h3 {
     font-size: 22px;
     font-weight: 700;
-    color: #0f172a;
+    color: var(--wp-text);
     margin: 0;
     flex: 1;
   }
@@ -2077,22 +1406,22 @@ const AssignModalBody = styled.div`
   margin-bottom: 24px;
   
   .task-info {
-    background: #f8fafc;
+    background: var(--wp-surface-2);
     padding: 16px;
-    border-radius: 12px;
-    border: 1px solid #e2e8f0;
+    border-radius: var(--wp-radius-lg);
+    border: 1px solid var(--wp-border);
     margin-bottom: 20px;
     
     .task-title {
       font-weight: 600;
-      color: #0f172a;
+      color: var(--wp-text);
       font-size: 15px;
       margin-bottom: 4px;
     }
     
     .current-assignee {
       font-size: 13px;
-      color: #64748b;
+      color: var(--wp-text-muted);
       margin-top: 8px;
     }
   }
@@ -2106,28 +1435,28 @@ const AssignModalBody = styled.div`
       left: 16px;
       top: 50%;
       transform: translateY(-50%);
-      color: #94a3b8;
+      color: var(--wp-text-subtle);
       pointer-events: none;
     }
     
     input {
       width: 100%;
       padding: 12px 16px 12px 44px;
-      border: 2px solid #e2e8f0;
-      border-radius: 12px;
+      border: 2px solid var(--wp-border);
+      border-radius: var(--wp-radius-lg);
       font-size: 14px;
-      color: #0f172a;
+      color: var(--wp-text);
       transition: all 0.2s ease;
-      background: white;
+      background: var(--wp-surface);
       
       &:focus {
         outline: none;
-        border-color: #7c3aed;
+        border-color: var(--wp-primary);
         box-shadow: 0 0 0 4px rgba(124, 58, 237, 0.1);
       }
       
       &::placeholder {
-        color: #94a3b8;
+        color: var(--wp-text-subtle);
       }
     }
   }
@@ -2135,8 +1464,8 @@ const AssignModalBody = styled.div`
   .users-list {
     max-height: 300px;
     overflow-y: auto;
-    border: 2px solid #e2e8f0;
-    border-radius: 12px;
+    border: 2px solid var(--wp-border);
+    border-radius: var(--wp-radius-lg);
     padding: 8px;
     
     &::-webkit-scrollbar {
@@ -2148,11 +1477,11 @@ const AssignModalBody = styled.div`
     }
     
     &::-webkit-scrollbar-thumb {
-      background: #cbd5e1;
+      background: var(--wp-border-strong);
       border-radius: 4px;
       
       &:hover {
-        background: #94a3b8;
+        background: var(--wp-text-subtle);
       }
     }
   }
@@ -2161,9 +1490,9 @@ const AssignModalBody = styled.div`
 const UserOption = styled.button`
   width: 100%;
   padding: 14px 16px;
-  border: 2px solid ${props => props.selected ? '#7c3aed' : '#e2e8f0'};
-  border-radius: 10px;
-  background: ${props => props.selected ? '#f3e8ff' : 'white'};
+  border: 2px solid ${props => props.selected ? 'var(--wp-primary)' : 'var(--wp-border)'};
+  border-radius: var(--wp-radius-lg);
+  background: ${props => props.selected ? 'var(--wp-primary-muted)' : 'var(--wp-surface)'};
   text-align: left;
   cursor: pointer;
   transition: all 0.15s ease;
@@ -2177,20 +1506,20 @@ const UserOption = styled.button`
   }
   
   &:hover {
-    border-color: ${props => props.selected ? '#7c3aed' : '#a78bfa'};
-    background: ${props => props.selected ? '#f3e8ff' : '#faf5ff'};
+    border-color: ${props => props.selected ? 'var(--wp-primary)' : 'var(--wp-primary-border)'};
+    background: ${props => props.selected ? 'var(--wp-primary-muted)' : 'var(--wp-primary-muted)'};
     transform: translateX(2px);
   }
   
   .avatar {
     width: 40px;
     height: 40px;
-    border-radius: 10px;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: var(--wp-radius-lg);
+    background: var(--wp-primary);
     display: flex;
     align-items: center;
     justify-content: center;
-    color: white;
+    color: var(--wp-on-primary);
     font-weight: 600;
     font-size: 14px;
     flex-shrink: 0;
@@ -2202,7 +1531,7 @@ const UserOption = styled.button`
     
     .name {
       font-weight: 600;
-      color: #0f172a;
+      color: var(--wp-text);
       font-size: 14px;
       margin-bottom: 2px;
       white-space: nowrap;
@@ -2212,7 +1541,7 @@ const UserOption = styled.button`
     
     .email {
       font-size: 12px;
-      color: #64748b;
+      color: var(--wp-text-muted);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -2220,7 +1549,7 @@ const UserOption = styled.button`
   }
   
   .check {
-    color: #7c3aed;
+    color: var(--wp-primary);
     flex-shrink: 0;
   }
 `;
@@ -2233,7 +1562,7 @@ const AssignModalActions = styled.div`
 
 const AssignModalButton = styled.button`
   padding: 12px 24px;
-  border-radius: 10px;
+  border-radius: var(--wp-radius-lg);
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
@@ -2245,22 +1574,21 @@ const AssignModalButton = styled.button`
   gap: 8px;
   
   &.cancel {
-    background: #f1f5f9;
-    color: #475569;
+    background: var(--wp-surface-2);
+    color: var(--wp-text-muted);
     
     &:hover {
-      background: #e2e8f0;
-      color: #334155;
+      background: var(--wp-border);
+      color: var(--wp-text);
     }
   }
   
   &.confirm {
-    background: linear-gradient(135deg, #7c3aed, #6d28d9);
-    color: white;
+    background: var(--wp-primary);
+    color: var(--wp-on-primary);
     box-shadow: 0 4px 12px rgba(124, 58, 237, 0.3);
     
     &:hover {
-      transform: translateY(-1px);
       box-shadow: 0 6px 16px rgba(124, 58, 237, 0.4);
     }
     
@@ -2282,6 +1610,8 @@ const AssignModalButton = styled.button`
 
 const TaskManagement = () => {
   const { user } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
   const ownerId = user?._id || user?.id;
   const { tasks, setTasks, isLoading: tasksLoading } = useTasks();
   const [newTask, setNewTask] = useState('');
@@ -2292,6 +1622,8 @@ const TaskManagement = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isCreatingTask, setIsCreatingTask] = useState(false);
+  const [isSavingTask, setIsSavingTask] = useState(false);
+  const [newTaskImages, setNewTaskImages] = useState([]);
   const [editingTask, setEditingTask] = useState(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showImageModal, setShowImageModal] = useState(false);
@@ -2322,14 +1654,12 @@ const TaskManagement = () => {
   const [editingMeetingId, setEditingMeetingId] = useState(null);
   const [inlineAddByColumn, setInlineAddByColumn] = useState({});
   const [inlineAddingColumn, setInlineAddingColumn] = useState('');
+  const [inlineAttachColumn, setInlineAttachColumn] = useState(null);
+  const [inlineReadingImages, setInlineReadingImages] = useState(false);
   const [projects, setProjects] = useState([]);
+  const [projectsLoading, setProjectsLoading] = useState(true);
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const [isProjectDropdownOpen, setIsProjectDropdownOpen] = useState(false);
-  const [showProjectsModal, setShowProjectsModal] = useState(false);
-  const [projectForm, setProjectForm] = useState({ name: '', description: '' });
-  const [isSavingProject, setIsSavingProject] = useState(false);
-  const [editingProjectId, setEditingProjectId] = useState(null);
-  const [isDeletingProjectId, setIsDeletingProjectId] = useState('');
   const [meetingForm, setMeetingForm] = useState({
     title: '',
     start: '',
@@ -2344,27 +1674,38 @@ const TaskManagement = () => {
     [projects, selectedProjectId]
   );
 
-  // Permission checking helper
-  const hasPermission = (permission) => {
-    if (!user || !user.permissions) return false;
-    
-    // Admin role always has access
-    if (user.roles && user.roles.includes('admin')) {
-      return true;
-    }
-    
-    // Check if user has the permission
-    return user.permissions.includes(permission) || user.permissions.includes('admin.access');
-  };
-
-  const canCreate = hasPermission('tasks.create');
-  const canUpdate = hasPermission('tasks.update');
-  const canDelete = hasPermission('tasks.delete');
-  const canAssign = hasPermission('tasks.assign');
-  const canManageProjects = hasPermission('projects.manage');
+  const canCreate = hasPermission(user, 'tasks.create');
+  const canUpdate = hasPermission(user, 'tasks.update');
+  const canDelete = hasPermission(user, 'tasks.delete');
+  const canAssign = hasPermission(user, 'tasks.assign');
+  const canManageProjects = hasPermission(user, 'projects.manage');
 
   const editQuillRef = useRef(null);
   const projectDropdownRef = useRef(null);
+
+  const getInlineAddDraft = useCallback(
+    (columnStatus) => inlineAddByColumn[columnStatus] || EMPTY_INLINE_ADD_DRAFT,
+    [inlineAddByColumn]
+  );
+
+  // Arriving from the Projects page selects that project's board.
+  useEffect(() => {
+    const requested = location.state?.projectId;
+    if (requested && projects.some((p) => p.id === requested)) {
+      setSelectedProjectId(requested);
+    }
+  }, [location.state, projects]);
+
+  useEffect(() => {
+    if (location.state?.openCreateTask) {
+      if (selectedProjectId) {
+        setShowAddModal(true);
+      } else {
+        toast.error('Create or select a project first');
+      }
+      window.history.replaceState({}, document.title);
+    }
+  }, [location.state, selectedProjectId]);
 
   const formats = [
     'header', 'bold', 'italic', 'underline', 'strike',
@@ -2372,34 +1713,101 @@ const TaskManagement = () => {
     'link', 'image'
   ];
 
+  const syncEditDescriptionFromQuill = useCallback(() => {
+    const quill = editQuillRef.current?.getEditor();
+    if (!quill) return;
+    const html = quill.root.innerHTML;
+    setEditForm((prev) => (prev.description === html ? prev : { ...prev, description: html }));
+  }, []);
+
+  const insertImageIntoQuill = useCallback(async (file) => {
+    const validationError = validateTaskImageFile(file);
+    if (validationError) {
+      toast.error(validationError);
+      return;
+    }
+    setIsUploadingImage(true);
+    try {
+      const dataUrl = await prepareImageDataUrlForTask(file);
+      const quill = editQuillRef.current?.getEditor();
+      const range = quill?.getSelection(true);
+      const index = range?.index ?? quill?.getLength() ?? 0;
+      if (quill) {
+        quill.insertEmbed(index, 'image', dataUrl);
+        quill.setSelection(index + 1);
+        syncEditDescriptionFromQuill();
+      } else {
+        setEditForm((prev) => ({
+          ...prev,
+          description: `${prev.description || ''}${imagesToDescriptionHtml([dataUrl])}`,
+        }));
+      }
+    } catch {
+      toast.error('Failed to load image');
+    } finally {
+      setIsUploadingImage(false);
+    }
+  }, [syncEditDescriptionFromQuill]);
+
   const editImageHandler = useCallback(() => {
     const input = document.createElement('input');
     input.setAttribute('type', 'file');
-    input.setAttribute('accept', 'image/*');
+    input.setAttribute('accept', TASK_IMAGE_ACCEPT);
     input.click();
 
-    input.onchange = () => {
-      const file = input.files[0];
-      if (file) {
-        setIsUploadingImage(true);
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          const quill = editQuillRef.current?.getEditor();
-          const range = quill?.getSelection();
-          if (range) {
-            quill.insertEmbed(range.index, 'image', e.target.result);
-            quill.setSelection(range.index + 1);
-          }
-          setIsUploadingImage(false);
-        };
-        reader.onerror = () => {
-          setIsUploadingImage(false);
-          toast.error('Failed to load image');
-        };
-        reader.readAsDataURL(file);
-      }
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      await insertImageIntoQuill(file);
     };
+  }, [insertImageIntoQuill]);
+
+  const handleCreateAttachFiles = async (files) => {
+    const { items, errors } = await processTaskImageFiles(files, newTaskImages.length);
+    errors.forEach((msg) => toast.error(msg));
+    if (items.length) {
+      setNewTaskImages((prev) => [...prev, ...items]);
+    } else if (files?.length) {
+      toast.error('Could not add file — use PNG, JPG, GIF, or WebP under 5MB');
+    }
+  };
+
+  const handleEditAttachFiles = async (files) => {
+    const existingCount = parseImagesFromDescription(editForm.description).length;
+    setIsUploadingImage(true);
+    try {
+      const { items, errors } = await processTaskImageFiles(files, existingCount);
+      errors.forEach((msg) => toast.error(msg));
+      if (items.length) {
+        const imageHtml = imagesToDescriptionHtml(items.map((i) => i.dataUrl));
+        setEditForm((prev) => ({
+          ...prev,
+          description: `${prev.description || ''}${imageHtml}`,
+        }));
+      } else if (files?.length) {
+        toast.error('Could not add file — use PNG, JPG, GIF, or WebP under 5MB');
+      }
+    } finally {
+      setIsUploadingImage(false);
+    }
+  };
+
+  const handleEditAttachmentsChange = useCallback((nextList) => {
+    setEditForm((prev) => {
+      const current = parseImagesFromDescription(prev.description);
+      const removed = current.filter((a) => !nextList.some((n) => n.id === a.id));
+      let desc = prev.description;
+      removed.forEach((r) => {
+        desc = removeImageFromDescription(desc, r.dataUrl);
+      });
+      return { ...prev, description: desc };
+    });
   }, []);
+
+  const editAttachments = useMemo(
+    () => parseImagesFromDescription(editForm.description),
+    [editForm.description]
+  );
 
   const editModules = useMemo(() => ({
     toolbar: {
@@ -2484,6 +1892,8 @@ const TaskManagement = () => {
     } catch (error) {
       console.error('Failed to load projects:', error);
       toast.error('Failed to load projects');
+    } finally {
+      setProjectsLoading(false);
     }
   }, []);
 
@@ -2541,97 +1951,6 @@ const TaskManagement = () => {
     }
   };
 
-  const saveProject = async (e) => {
-    e.preventDefault();
-    if (isSavingProject) return;
-    const name = projectForm.name.trim();
-    if (!name) return;
-    try {
-      setIsSavingProject(true);
-      if (editingProjectId) {
-        const response = await projectsAPI.updateProject(editingProjectId, {
-          name,
-          description: projectForm.description.trim(),
-        });
-        const updated = response.data.project;
-        setProjects((prev) =>
-          prev.map((p) => (p.id === updated.id ? updated : p)).sort((a, b) => a.name.localeCompare(b.name))
-        );
-        toast.success('Project updated');
-      } else {
-        const response = await projectsAPI.createProject({
-          name,
-          description: projectForm.description.trim(),
-        });
-        const created = response.data.project;
-        setProjects((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
-        setSelectedProjectId(created.id);
-        toast.success('Project created');
-      }
-      setEditingProjectId(null);
-      setProjectForm({ name: '', description: '' });
-    } catch (error) {
-      console.error('Failed to save project:', error);
-      toast.error(error.response?.data?.message || 'Failed to save project');
-    } finally {
-      setIsSavingProject(false);
-    }
-  };
-
-  const startEditProject = (project) => {
-    setEditingProjectId(project.id);
-    setProjectForm({
-      name: project.name || '',
-      description: project.description || '',
-    });
-  };
-
-  const cancelProjectEdit = () => {
-    if (isSavingProject) return;
-    setEditingProjectId(null);
-    setProjectForm({ name: '', description: '' });
-  };
-
-  const deleteProject = async (project) => {
-    if (!project?.id || isDeletingProjectId) return;
-    const ok = window.confirm(`Delete project "${project.name}"?`);
-    if (!ok) return;
-    try {
-      setIsDeletingProjectId(project.id);
-      await projectsAPI.deleteProject(project.id);
-      setProjects((prev) => prev.filter((p) => p.id !== project.id));
-      if (selectedProjectId === project.id) {
-        setSelectedProjectId('');
-      }
-      if (editingProjectId === project.id) {
-        cancelProjectEdit();
-      }
-      toast.success('Project deleted');
-    } catch (error) {
-      console.error('Failed to delete project:', error);
-      toast.error(error.response?.data?.message || 'Failed to delete project');
-    } finally {
-      setIsDeletingProjectId('');
-    }
-  };
-
-  const getFilteredTasks = () => {
-    let filtered = tasks;
-    
-    if (filter !== 'all') {
-      filtered = filtered.filter(task => task.status === filter);
-    }
-    
-    if (searchQuery) {
-      filtered = filtered.filter(task => 
-        task.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (task.description && task.description.toLowerCase().includes(searchQuery.toLowerCase()))
-      );
-    }
-    
-    return filtered;
-  };
-
   const columnConfigs = useMemo(() => {
     const base = kanbanColumns.map((c) => ({
       status: c.id,
@@ -2645,21 +1964,12 @@ const TaskManagement = () => {
     const orphans = orphanStatuses.map((s) => ({
       status: s,
       title: `Other (${s})`,
-      color: '#94a3b8',
+      color: 'var(--wp-text-subtle)',
       emptyText: 'No tasks',
       isDone: false,
     }));
     return [...base, ...orphans];
   }, [kanbanColumns, tasks]);
-
-  const getStats = (taskList) => {
-    const total = taskList.length;
-    const byColumn = {};
-    columnConfigs.forEach((c) => {
-      byColumn[c.status] = taskList.filter((t) => t.status === c.status).length;
-    });
-    return { total, byColumn };
-  };
 
   const addTask = async (e) => {
     e.preventDefault();
@@ -2672,9 +1982,18 @@ const TaskManagement = () => {
 
     try {
       setIsCreatingTask(true);
+      const optimizedUrls = await ensureImageDataUrlsFitTaskStorage(
+        newTaskImages.map((img) => img.dataUrl)
+      );
+      const description = buildTaskDescription(newDescription, optimizedUrls);
+      const sizeError = validateDescriptionForFirestore(description);
+      if (sizeError) {
+        toast.error(sizeError);
+        return;
+      }
       const response = await tasksAPI.createTask({
         title: newTask.trim(),
-        description: plainTextToSafeDescriptionHtml(newDescription),
+        description,
         priority: newPriority,
         dueDate: newDueDate || null,
         projectId: selectedProjectId,
@@ -2685,22 +2004,30 @@ const TaskManagement = () => {
       setNewDescription('');
       setNewPriority('medium');
       setNewDueDate('');
+      setNewTaskImages([]);
       setShowAddModal(false);
       toast.success('Task added successfully!');
     } catch (error) {
       console.error('Error adding task:', error);
-      toast.error(error.response?.data?.message || 'Failed to add task');
+      toast.error(getTaskSaveErrorMessage(error, buildTaskDescription(
+        newDescription,
+        newTaskImages.map((img) => img.dataUrl)
+      )));
     } finally {
       setIsCreatingTask(false);
     }
   };
 
   const openInlineAdd = (columnStatus) => {
-    setInlineAddByColumn((prev) => ({ ...prev, [columnStatus]: '' }));
+    setInlineAddByColumn((prev) => ({
+      ...prev,
+      [columnStatus]: { title: '', images: [] },
+    }));
   };
 
   const cancelInlineAdd = (columnStatus) => {
     if (inlineAddingColumn === columnStatus) return;
+    if (inlineReadingImages && inlineAttachColumn === columnStatus) return;
     setInlineAddByColumn((prev) => {
       const next = { ...prev };
       delete next[columnStatus];
@@ -2708,24 +2035,90 @@ const TaskManagement = () => {
     });
   };
 
-  const updateInlineAddValue = (columnStatus, value) => {
-    setInlineAddByColumn((prev) => ({ ...prev, [columnStatus]: value }));
+  const updateInlineAddTitle = (columnStatus, title) => {
+    setInlineAddByColumn((prev) => ({
+      ...prev,
+      [columnStatus]: { ...getInlineAddDraft(columnStatus), title },
+    }));
+  };
+
+  const handleInlineImageFiles = async (files, columnStatus) => {
+    if (!columnStatus || !files?.length) return;
+
+    const draft = getInlineAddDraft(columnStatus);
+    if (draft.images.length >= TASK_IMAGE_MAX_COUNT) {
+      toast.error(`Maximum ${TASK_IMAGE_MAX_COUNT} images per task`);
+      return;
+    }
+
+    setInlineAttachColumn(columnStatus);
+    setInlineReadingImages(true);
+
+    try {
+      const { items, errors } = await processTaskImageFiles(files, draft.images.length);
+      errors.forEach((msg) => toast.error(msg));
+
+      if (items.length > 0) {
+        setInlineAddByColumn((prev) => {
+          const current = prev[columnStatus] || EMPTY_INLINE_ADD_DRAFT;
+          return {
+            ...prev,
+            [columnStatus]: {
+              ...current,
+              images: [...current.images, ...items],
+            },
+          };
+        });
+      } else if (files.length) {
+        toast.error('Could not add file — use PNG, JPG, GIF, or WebP under 5MB');
+      }
+    } finally {
+      setInlineReadingImages(false);
+      setInlineAttachColumn(null);
+    }
+  };
+
+  const removeInlineImage = (columnStatus, imageId) => {
+    setInlineAddByColumn((prev) => {
+      const draft = getInlineAddDraft(columnStatus);
+      return {
+        ...prev,
+        [columnStatus]: {
+          ...draft,
+          images: draft.images.filter((img) => img.id !== imageId),
+        },
+      };
+    });
   };
 
   const submitInlineAdd = async (event, columnStatus) => {
     event.preventDefault();
-    if (inlineAddingColumn || isCreatingTask) return;
-    const title = (inlineAddByColumn[columnStatus] || '').trim();
+    if (inlineAddingColumn || isCreatingTask || inlineReadingImages) return;
+
+    const draft = getInlineAddDraft(columnStatus);
+    const title = (draft.title || '').trim();
     if (!title) return;
+
     if (!selectedProjectId) {
       toast.error('Create/select a project first');
       return;
     }
+
+    let description = '';
     try {
       setInlineAddingColumn(columnStatus);
+      const optimizedUrls = await ensureImageDataUrlsFitTaskStorage(
+        draft.images.map((img) => img.dataUrl)
+      );
+      description = imagesToDescriptionHtml(optimizedUrls);
+      const sizeError = validateDescriptionForFirestore(description);
+      if (sizeError) {
+        toast.error(sizeError);
+        return;
+      }
       const response = await tasksAPI.createTask({
         title,
-        description: '',
+        description,
         priority: 'medium',
         status: columnStatus,
         projectId: selectedProjectId,
@@ -2736,10 +2129,10 @@ const TaskManagement = () => {
         delete next[columnStatus];
         return next;
       });
-      toast.success('Task added');
+      toast.success(draft.images.length ? 'Task added with images' : 'Task added');
     } catch (error) {
       console.error('Error adding quick task:', error);
-      toast.error(error.response?.data?.message || 'Failed to add task');
+      toast.error(getTaskSaveErrorMessage(error, description));
     } finally {
       setInlineAddingColumn('');
     }
@@ -2806,112 +2199,11 @@ const TaskManagement = () => {
   };
 
   const handleDragEnd = (result) => {
+    if (!canUpdate) return;
     const { destination, source, draggableId } = result;
     if (!destination) return;
     if (destination.droppableId === source.droppableId) return;
     updateTaskStatus(draggableId, destination.droppableId);
-  };
-
-  const renderTaskActions = (columnStatus, task) => {
-    const doneCol = columnConfigs.find((c) => c.isDone);
-    const doneId = doneCol?.status;
-    const firstNonDone = columnConfigs.find((c) => !c.isDone);
-    const idx = columnConfigs.findIndex((c) => c.status === columnStatus);
-    const nextCol = idx >= 0 ? columnConfigs[idx + 1] : null;
-    return (
-    <KanbanTaskActions>
-      {canUpdate && (
-        <>
-          <MoveStatusSelect
-            value=""
-            aria-label="Move task"
-            onClick={(e) => e.stopPropagation()}
-            onChange={(e) => {
-              e.stopPropagation();
-              const v = e.target.value;
-              if (v) updateTaskStatus(task._id, v);
-              e.target.value = '';
-            }}
-          >
-            <option value="">Move to…</option>
-            {columnConfigs
-              .filter((c) => c.status !== task.status)
-              .map((c) => (
-                <option key={c.status} value={c.status}>
-                  {c.title}
-                </option>
-              ))}
-          </MoveStatusSelect>
-          {nextCol && (
-            <KanbanIconButton
-              onClick={(e) => handleStatusChange(e, task, nextCol.status)}
-              title={`Move to ${nextCol.title}`}
-              aria-label={`Move to ${nextCol.title}`}
-            >
-              <PlayCircle />
-            </KanbanIconButton>
-          )}
-          {doneId && task.status !== doneId && (
-            <KanbanIconButton
-              completed
-              onClick={(e) => handleStatusChange(e, task, doneId)}
-              title="Mark complete"
-              aria-label="Mark complete"
-            >
-              <CheckCircle2 />
-            </KanbanIconButton>
-          )}
-          {doneId && task.status === doneId && firstNonDone && (
-            <KanbanIconButton
-              onClick={(e) => handleStatusChange(e, task, firstNonDone.status)}
-              title="Reopen task"
-              aria-label="Reopen task"
-            >
-              <RotateCcw />
-            </KanbanIconButton>
-          )}
-          <KanbanIconButton 
-            edit 
-            onClick={(e) => { 
-              e.stopPropagation(); 
-              openEditModal(task); 
-            }}
-            title="Edit task"
-            aria-label="Edit task"
-          >
-            <Edit />
-          </KanbanIconButton>
-        </>
-      )}
-      {canAssign && (
-        <KanbanIconButton 
-          assign
-          onClick={(e) => { 
-            e.stopPropagation(); 
-            handleAssignTask(task); 
-          }}
-          title="Assign task"
-          aria-label="Assign task"
-        >
-          <UserPlus />
-        </KanbanIconButton>
-      )}
-      {canDelete && (
-        <KanbanIconButton 
-          danger 
-          onClick={(e) => { 
-            e.stopPropagation(); 
-            setTaskToDelete(task);
-            setShowDeleteModal(true);
-          }}
-          title="Delete task"
-          aria-label="Delete task"
-        >
-          <Trash2 />
-        </KanbanIconButton>
-      )}
-    </KanbanTaskActions>
-    );
   };
 
   const deleteTask = async () => {
@@ -2997,24 +2289,6 @@ const TaskManagement = () => {
     }
   };
 
-  const getUserInitials = (user) => {
-    if (!user) return '?';
-    const firstName = user.firstName || '';
-    const lastName = user.lastName || '';
-    if (firstName && lastName) {
-      return `${firstName[0]}${lastName[0]}`.toUpperCase();
-    }
-    return (user.email || '?')[0].toUpperCase();
-  };
-
-  const getUserDisplayName = (user) => {
-    if (!user) return 'Unassigned';
-    if (user.firstName && user.lastName) {
-      return `${user.firstName} ${user.lastName}`;
-    }
-    return user.email || 'Unknown';
-  };
-
   const getFilteredUsers = () => {
     if (!userSearchQuery) return users;
     const query = userSearchQuery.toLowerCase();
@@ -3049,22 +2323,7 @@ const TaskManagement = () => {
     setNewDescription('');
     setNewPriority('medium');
     setNewDueDate('');
-  };
-
-  const stripImagesFromHTML = (html) => {
-    if (!html) return html;
-    const div = document.createElement('div');
-    div.innerHTML = html;
-    const images = div.querySelectorAll('img');
-    images.forEach(img => {
-      const placeholder = document.createElement('span');
-      placeholder.textContent = '📷 Image';
-      placeholder.style.color = '#3b82f6';
-      placeholder.style.fontSize = '11px';
-      placeholder.style.fontStyle = 'italic';
-      img.parentNode.replaceChild(placeholder, img);
-    });
-    return div.innerHTML;
+    setNewTaskImages([]);
   };
 
   const handleTaskClick = (task) => {
@@ -3074,13 +2333,20 @@ const TaskManagement = () => {
 
   const saveTask = async (e) => {
     e.preventDefault();
+    if (isSavingTask) return;
     if (!editForm.title.trim()) return;
 
     try {
+      setIsSavingTask(true);
       const payload = {
         ...editForm,
         dueDate: editForm.dueDate || null,
       };
+      const sizeError = validateDescriptionForFirestore(payload.description);
+      if (sizeError) {
+        toast.error(sizeError);
+        return;
+      }
       const response = await tasksAPI.updateTask(editingTask._id, payload);
       setTasks(tasks.map(t => 
         t._id === editingTask._id ? response.data : t
@@ -3088,7 +2354,9 @@ const TaskManagement = () => {
       closeEditModal();
       toast.success('Task updated successfully!');
     } catch (error) {
-      toast.error('Failed to update task');
+      toast.error(getTaskSaveErrorMessage(error, editForm.description));
+    } finally {
+      setIsSavingTask(false);
     }
   };
 
@@ -3203,741 +2471,586 @@ const TaskManagement = () => {
     () => tasks.filter((task) => task.projectId === selectedProjectId),
     [tasks, selectedProjectId]
   );
-  const stats = getStats(projectTasks);
-  const priorityColors = {
-    urgent: { bg: '#fef2f2', border: '#fecaca', text: '#991b1b' },
-    high: { bg: '#fffbeb', border: '#fde68a', text: '#92400e' },
-    medium: { bg: '#eff6ff', border: '#bfdbfe', text: '#1e40af' },
-    low: { bg: '#f9fafb', border: '#e5e7eb', text: '#4b5563' }
-  };
-  const visibleTasks = projectTasks.filter(task =>
-    !searchQuery || task.title.toLowerCase().includes(searchQuery.toLowerCase())
+
+  // Typing stays instant: filtering runs against the deferred query. Search uses
+  // the plain-text preview, never the raw HTML (which can hold base64 images).
+  const deferredSearch = useDeferredValue(searchQuery);
+  const visibleTasks = useMemo(() => {
+    const q = deferredSearch.trim().toLowerCase();
+    return projectTasks.filter((task) => {
+      if (filter !== 'all' && task.status !== filter) return false;
+      if (!q) return true;
+      return (
+        task.title.toLowerCase().includes(q) ||
+        getTaskPreview(task.description).text.toLowerCase().includes(q)
+      );
+    });
+  }, [projectTasks, filter, deferredSearch]);
+
+  const tasksByStatus = useMemo(() => {
+    const map = {};
+    columnConfigs.forEach((c) => {
+      map[c.status] = [];
+    });
+    visibleTasks.forEach((t) => {
+      (map[t.status] || (map[t.status] = [])).push(t);
+    });
+    return map;
+  }, [columnConfigs, visibleTasks]);
+
+  const columnTotals = useMemo(() => {
+    const totals = {};
+    projectTasks.forEach((t) => {
+      totals[t.status] = (totals[t.status] || 0) + 1;
+    });
+    return totals;
+  }, [projectTasks]);
+
+  const summary = useMemo(() => {
+    const doneStatuses = new Set(columnConfigs.filter((c) => c.isDone).map((c) => c.status));
+    let done = 0;
+    let overdue = 0;
+    projectTasks.forEach((t) => {
+      if (doneStatuses.has(t.status)) done += 1;
+      else if (getDueVariant(t.dueDate) === 'overdue') overdue += 1;
+    });
+    return { total: projectTasks.length, done, overdue };
+  }, [projectTasks, columnConfigs]);
+
+  const columnMeta = useMemo(() => {
+    const doneStatus = columnConfigs.find((c) => c.isDone)?.status || null;
+    const reopenStatus = columnConfigs.find((c) => !c.isDone)?.status || null;
+    return columnConfigs.map((c, i) => ({
+      ...c,
+      next: columnConfigs[i + 1] || null,
+      doneStatus,
+      reopenStatus,
+    }));
+  }, [columnConfigs]);
+
+  const columnByStatus = useMemo(() => {
+    const map = {};
+    columnConfigs.forEach((c) => {
+      map[c.status] = c;
+    });
+    return map;
+  }, [columnConfigs]);
+
+  const can = useMemo(
+    () => ({ update: canUpdate, assign: canAssign, remove: canDelete }),
+    [canUpdate, canAssign, canDelete]
   );
+
+  // Stable callbacks for memoized cards; each call reaches the latest handler.
+  const handlersRef = useRef(null);
+  handlersRef.current = {
+    open: handleTaskClick,
+    move: (task, status) => {
+      if (task.status !== status) updateTaskStatus(task._id, status);
+    },
+    edit: openEditModal,
+    assign: handleAssignTask,
+    remove: (task) => {
+      setTaskToDelete(task);
+      setShowDeleteModal(true);
+    },
+  };
+  const cardActions = useMemo(
+    () => ({
+      open: (t) => handlersRef.current.open(t),
+      move: (t, s) => handlersRef.current.move(t, s),
+      edit: (t) => handlersRef.current.edit(t),
+      assign: (t) => handlersRef.current.assign(t),
+      remove: (t) => handlersRef.current.remove(t),
+    }),
+    []
+  );
+
+  // The drawer follows the live task so status/comment changes show immediately.
+  const liveSelectedTask = selectedTask
+    ? tasks.find((t) => t._id === selectedTask._id) || selectedTask
+    : null;
+
+  // Deep links from My Work: { openTaskId } opens the drawer, { editTaskId } the editor.
+  useEffect(() => {
+    const { openTaskId, editTaskId } = location.state || {};
+    const id = openTaskId || editTaskId;
+    if (!id) return;
+    const task = tasks.find((t) => t._id === id);
+    if (!task) return;
+    if (editTaskId) cardActions.edit(task);
+    else cardActions.open(task);
+    navigate(location.pathname, { replace: true, state: null });
+  }, [location.state, location.pathname, tasks, cardActions, navigate]);
+
+  // "/" focuses task search from anywhere on the page.
+  const searchInputRef = useRef(null);
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey) return;
+      const el = e.target;
+      const tag = el?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el?.isContentEditable) return;
+      if (!searchInputRef.current) return;
+      e.preventDefault();
+      searchInputRef.current.focus();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  const openTaskOnEnter = (task) => (e) => {
+    if (e.key === 'Enter' && e.target === e.currentTarget) cardActions.open(task);
+  };
+
+  const donePct = summary.total ? Math.round((summary.done / summary.total) * 100) : 0;
+
+  // Until projects load and one is selected we cannot know which board (or empty
+  // state) to show, so the whole page body is a skeleton rather than a wrong state.
+  const projectsPending = projectsLoading || (projects.length > 0 && !selectedProjectId);
 
   return (
     <Container>
-      <ContentWrapper>
-        <MainContent>
-          <ProjectBar>
-            <ProjectSelectorWrap>
-              <ProjectLabel>
-                <FolderKanban size={13} style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
-                Project
-              </ProjectLabel>
-              <ProjectSelectShell ref={projectDropdownRef}>
-                <ProjectSelectTrigger
+      {projectsPending ? (
+        <TasksPageSkeleton columns={columnConfigs.length} />
+      ) : (
+      <>
+      <Toolbar>
+        <ProjectSelectShell ref={projectDropdownRef}>
+          <ProjectSelectTrigger
+            type="button"
+            $open={isProjectDropdownOpen}
+            onClick={() => {
+              if (projects.length === 0) return;
+              setIsProjectDropdownOpen((prev) => !prev);
+            }}
+            disabled={projects.length === 0}
+            aria-haspopup="listbox"
+            aria-expanded={isProjectDropdownOpen}
+            aria-label="Select project"
+          >
+            <span className="lead" style={{ background: selectedProject?.color || 'var(--wp-text-subtle)' }} aria-hidden />
+            <span className="value">{selectedProject ? selectedProject.name : 'No projects yet'}</span>
+            <ChevronDown className="icon" size={14} aria-hidden />
+          </ProjectSelectTrigger>
+          {isProjectDropdownOpen && projects.length > 0 && (
+            <ProjectDropdownMenu role="listbox" aria-label="Projects">
+              {projects.map((project) => (
+                <ProjectDropdownItem
+                  key={project.id}
                   type="button"
-                  $open={isProjectDropdownOpen}
+                  role="option"
+                  aria-selected={selectedProjectId === project.id}
+                  $active={selectedProjectId === project.id}
                   onClick={() => {
-                    if (projects.length === 0) return;
-                    setIsProjectDropdownOpen((prev) => !prev);
+                    setSelectedProjectId(project.id);
+                    setIsProjectDropdownOpen(false);
                   }}
-                  disabled={projects.length === 0}
                 >
-                  <span className="value">
-                    {selectedProject ? selectedProject.name : 'No projects yet'}
+                  <span className="name">
+                    <span className="swatch" style={{ background: project.color }} aria-hidden />
+                    {project.name}
                   </span>
-                  <ChevronDown className="icon" size={16} />
-                </ProjectSelectTrigger>
-                {isProjectDropdownOpen && projects.length > 0 && (
-                  <ProjectDropdownMenu>
-                    {projects.map((project) => (
-                      <ProjectDropdownItem
-                        key={project.id}
-                        type="button"
-                        $active={selectedProjectId === project.id}
-                        onClick={() => {
-                          setSelectedProjectId(project.id);
-                          setIsProjectDropdownOpen(false);
-                        }}
-                      >
-                        <span>{project.name}</span>
-                        {selectedProjectId === project.id ? <Check size={14} /> : null}
-                      </ProjectDropdownItem>
-                    ))}
-                  </ProjectDropdownMenu>
-                )}
-              </ProjectSelectShell>
-            </ProjectSelectorWrap>
-            <ProjectActions>
-              <ProjectsTabButton
-                type="button"
-                onClick={() => setShowProjectsModal(true)}
-              >
-                <FolderKanban size={14} />
-                Projects
-              </ProjectsTabButton>
-            </ProjectActions>
-          </ProjectBar>
-          <HeaderActions>
-            <HeaderLeft>
-              <PageTitle>My Tasks</PageTitle>
-            </HeaderLeft>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
-              <ViewModeToggle>
-                <ViewModeButton
-                  type="button"
-                  $active={activeView === 'kanban'}
-                  onClick={() => setActiveView('kanban')}
-                  aria-label="Board view"
-                  title="Board view"
-                >
-                  <Columns3 size={15} />
-                </ViewModeButton>
-                <ViewModeButton
-                  type="button"
-                  $active={activeView === 'list'}
-                  onClick={() => setActiveView('list')}
-                  aria-label="List view"
-                  title="List view"
-                >
-                  <List size={15} />
-                </ViewModeButton>
-              </ViewModeToggle>
-              {canCreate && (
-                <AddTaskButton
-                  onClick={() => {
-                    if (!selectedProjectId) {
-                      toast.error('Create/select a project first');
-                      return;
-                    }
-                    setShowAddModal(true);
-                  }}
-                  disabled={!selectedProjectId}
-                  title={selectedProjectId ? 'Add task in this project' : 'Create/select a project first'}
-                >
-                  <Plus size={14} />
-                  Add Task
-                </AddTaskButton>
-              )}
-            </div>
-          </HeaderActions>
-
-          {!selectedProjectId && (
-            <EmptyState style={{ marginBottom: 12, padding: '24px 16px' }}>
-              <h3>Create your first project</h3>
-              <p>Projects organize your Kanban boards and tasks. Start by creating one.</p>
-            </EmptyState>
+                  {selectedProjectId === project.id ? <Check size={14} /> : null}
+                </ProjectDropdownItem>
+              ))}
+            </ProjectDropdownMenu>
           )}
+        </ProjectSelectShell>
+        <ToolbarButton type="button" onClick={() => navigate('/projects')} title="All projects (G P)">
+          <LayoutGrid size={14} />
+          All projects
+        </ToolbarButton>
 
-          {tasksLoading ? (
-            <SectionLoader message="Loading project tasks" minHeight="360px" />
-          ) : selectedProjectId ? (activeView === 'kanban' ? (
-            <DragDropContext onDragEnd={handleDragEnd}>
-              <KanbanBoard>
-                {columnConfigs.map((column) => {
-                  const columnTasks = projectTasks.filter(task =>
-                    task.status === column.status &&
-                    (!searchQuery || task.title.toLowerCase().includes(searchQuery.toLowerCase()))
-                  );
-                  const totalInColumn = projectTasks.filter(task => task.status === column.status).length;
-                  return (
-                    <KanbanColumn key={column.status}>
-                      <ColumnHeader color={column.color}>
-                        <ColumnTitle color={column.color}>{column.title}</ColumnTitle>
-                        <ColumnCount color={column.color}>{totalInColumn}</ColumnCount>
-                      </ColumnHeader>
-                      <Droppable droppableId={column.status}>
-                        {(provided, snapshot) => (
-                          <ColumnTasks
-                            ref={provided.innerRef}
-                            {...provided.droppableProps}
-                            style={snapshot.isDraggingOver ? { background: '#eef2ff50' } : undefined}
-                          >
-                            {columnTasks.map((task, index) => {
-                              const isCompletedColumn = column.isDone;
-                              const descriptionHtml = task.description
-                                ? (isCompletedColumn ? task.description : stripImagesFromHTML(task.description))
-                                : null;
-                              return (
-                                <Draggable key={task._id} draggableId={task._id} index={index}>
-                                  {(dragProvided, dragSnapshot) => (
-                                    <KanbanTask
-                                      ref={dragProvided.innerRef}
-                                      {...dragProvided.draggableProps}
-                                      {...dragProvided.dragHandleProps}
-                                      priority={task.priority}
-                                      onClick={() => handleTaskClick(task)}
-                                      style={dragProvided.draggableProps.style}
-                                      data-dragging={dragSnapshot.isDragging}
-                                    >
-                                      <KanbanTaskHeader>
-                                        <KanbanTaskTitle completed={isCompletedColumn}>{task.title}</KanbanTaskTitle>
-                                        <KanbanTaskMeta>
-                                          <KanbanTaskPriorityBadge priority={task.priority}>
-                                            {task.priority}
-                                          </KanbanTaskPriorityBadge>
-                                        {task.dueDate ? (
-                                          (() => {
-                                            const variant = getDueVariant(task.dueDate) || 'upcoming';
-                                            const text =
-                                              variant === 'overdue'
-                                                ? 'Overdue'
-                                                : variant === 'today'
-                                                  ? 'Due today'
-                                                  : `Due ${formatDueLabel(task.dueDate)}`;
-                                            return <DueBadge $variant={variant}>{text}</DueBadge>;
-                                          })()
-                                        ) : null}
-                                          {(task.assignees && task.assignees.length > 0) || task.user ? (
-                                            <KanbanTaskAssignee>
-                                              {(() => {
-                                                const assignees = task.assignees && task.assignees.length > 0
-                                                  ? task.assignees
-                                                  : (task.user ? [task.user] : []);
-                                                const visibleAssignees = assignees.slice(0, 2);
-                                                const remainingCount = assignees.length - 2;
-                                                return (
-                                                  <>
-                                                    {visibleAssignees.map((assignee, idx) => (
-                                                      <div key={idx} className="assignee-item" title={getUserDisplayName(assignee)}>
-                                                        <div className="avatar">
-                                                          {getUserInitials(assignee)}
-                                                        </div>
-                                                        {idx === 0 && assignees.length === 1 && (
-                                                          <span>{getUserDisplayName(assignee)}</span>
-                                                        )}
-                                                      </div>
-                                                    ))}
-                                                    {remainingCount > 0 && (
-                                                      <span className="more-count">+{remainingCount}</span>
-                                                    )}
-                                                  </>
-                                                );
-                                              })()}
-                                            </KanbanTaskAssignee>
-                                          ) : null}
-                                        </KanbanTaskMeta>
-                                      </KanbanTaskHeader>
-                                      {descriptionHtml && (
-                                        <KanbanTaskDescription
-                                          dangerouslySetInnerHTML={{ __html: descriptionHtml }}
-                                          style={isCompletedColumn ? { opacity: 0.7 } : {}}
-                                        />
-                                      )}
-                                      <KanbanTaskFooter>
-                                        {renderTaskActions(column.status, task)}
-                                      </KanbanTaskFooter>
-                                    </KanbanTask>
-                                  )}
-                                </Draggable>
-                              );
-                            })}
-                            {totalInColumn === 0 && (
-                              <EmptyState>
-                                <p style={{ fontSize: '13px' }}>{column.emptyText}</p>
-                              </EmptyState>
-                            )}
-                            {provided.placeholder}
-                          </ColumnTasks>
-                        )}
-                      </Droppable>
+        {selectedProjectId && (
+          <>
+            <Divider />
+            <SearchField>
+              <Search size={14} aria-hidden />
+              <SearchInput
+                ref={searchInputRef}
+                type="search"
+                placeholder="Filter tasks"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    setSearchQuery('');
+                    e.currentTarget.blur();
+                  }
+                }}
+                aria-label="Filter tasks"
+              />
+              {!searchQuery && <kbd>/</kbd>}
+            </SearchField>
+            <Segmented role="group" aria-label="Filter by status">
+              <SegmentButton type="button" $active={filter === 'all'} onClick={() => setFilter('all')}>
+                All <span className="n">{summary.total}</span>
+              </SegmentButton>
+              {columnConfigs.map((col) => (
+                <SegmentButton
+                  key={col.status}
+                  type="button"
+                  $active={filter === col.status}
+                  onClick={() => setFilter(filter === col.status ? 'all' : col.status)}
+                >
+                  <span className="dot" style={{ background: col.color }} aria-hidden />
+                  {col.title}
+                  <span className="n">{columnTotals[col.status] || 0}</span>
+                </SegmentButton>
+              ))}
+            </Segmented>
+            <span className="spacer" />
+            <Summary aria-label="Project progress">
+              {summary.overdue > 0 && <span className="overdue">{summary.overdue} overdue</span>}
+              <span>
+                {summary.done}/{summary.total} done
+              </span>
+              <span className="bar" aria-hidden>
+                <span style={{ width: `${donePct}%` }} />
+              </span>
+            </Summary>
+            <ViewModeToggle role="group" aria-label="View">
+              <ViewModeButton
+                type="button"
+                $active={activeView === 'kanban'}
+                onClick={() => setActiveView('kanban')}
+                aria-label="Board view"
+                aria-pressed={activeView === 'kanban'}
+                title="Board view"
+              >
+                <Columns3 size={14} />
+              </ViewModeButton>
+              <ViewModeButton
+                type="button"
+                $active={activeView === 'list'}
+                onClick={() => setActiveView('list')}
+                aria-label="List view"
+                aria-pressed={activeView === 'list'}
+                title="List view"
+              >
+                <List size={14} />
+              </ViewModeButton>
+            </ViewModeToggle>
+          </>
+        )}
+      </Toolbar>
+
+      {!selectedProjectId && (
+        <EmptyState>
+          <h3>{projects.length === 0 ? 'Create your first project' : 'Select a project'}</h3>
+          <p>Projects hold the board, the tasks and the team working on them.</p>
+          {canManageProjects && (
+            <EmptyAction type="button" onClick={() => navigate('/projects', { state: { create: true } })}>
+              <Plus size={14} />
+              New project
+            </EmptyAction>
+          )}
+        </EmptyState>
+      )}
+
+      {tasksLoading && selectedProjectId ? (
+        <TaskViewSkeleton view={activeView} columns={columnConfigs.length} />
+      ) : selectedProjectId ? (
+        activeView === 'kanban' ? (
+          <DragDropContext onDragEnd={handleDragEnd}>
+            <KanbanBoard>
+              {columnMeta.map((column) => {
+                const columnTasks = tasksByStatus[column.status] || [];
+                const total = columnTotals[column.status] || 0;
+                const inlineDraft = getInlineAddDraft(column.status);
+                const inlineIsOpen = Object.prototype.hasOwnProperty.call(inlineAddByColumn, column.status);
+                const inlineIsSubmitting = inlineAddingColumn === column.status;
+                const inlineIsBusy = inlineIsSubmitting || inlineReadingImages;
+                return (
+                  <KanbanColumn key={column.status} aria-label={column.title}>
+                    <ColumnHeader>
+                      <ColumnTitle>
+                        <span className="dot" style={{ background: column.color }} aria-hidden />
+                        {column.title}
+                      </ColumnTitle>
+                      <ColumnCount title={`${columnTasks.length} shown of ${total}`}>
+                        {columnTasks.length === total ? total : `${columnTasks.length}/${total}`}
+                      </ColumnCount>
                       {canCreate && (
-                        <ColumnQuickAddWrap>
-                          {Object.prototype.hasOwnProperty.call(inlineAddByColumn, column.status) ? (
-                            <ColumnQuickAddForm onSubmit={(e) => submitInlineAdd(e, column.status)}>
-                              <ColumnQuickAddInput
-                                type="text"
-                                value={inlineAddByColumn[column.status]}
-                                onChange={(e) => updateInlineAddValue(column.status, e.target.value)}
-                                placeholder={`Add task in ${column.title}...`}
-                                autoFocus
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Escape') cancelInlineAdd(column.status);
-                                }}
-                              />
-                              <ColumnQuickAddActions>
-                                <ColumnQuickAddAction
-                                  type="button"
-                                  onClick={() => cancelInlineAdd(column.status)}
-                                  disabled={inlineAddingColumn === column.status}
-                                >
-                                  Cancel
-                                </ColumnQuickAddAction>
-                                <ColumnQuickAddAction
-                                  type="submit"
-                                  $primary
-                                  disabled={
-                                    inlineAddingColumn === column.status ||
-                                    !String(inlineAddByColumn[column.status] || '').trim()
-                                  }
-                                >
-                                  {inlineAddingColumn === column.status ? 'Adding...' : 'Add'}
-                                </ColumnQuickAddAction>
-                              </ColumnQuickAddActions>
-                            </ColumnQuickAddForm>
-                          ) : (
-                            <ColumnQuickAddTrigger
-                              type="button"
-                              onClick={() => openInlineAdd(column.status)}
-                            >
-                              + Add task
-                            </ColumnQuickAddTrigger>
-                          )}
-                        </ColumnQuickAddWrap>
+                        <ColumnAddButton
+                          type="button"
+                          onClick={() => openInlineAdd(column.status)}
+                          title={`Add task to ${column.title}`}
+                          aria-label={`Add task to ${column.title}`}
+                        >
+                          <Plus size={15} />
+                        </ColumnAddButton>
                       )}
-                    </KanbanColumn>
-                  );
-                })}
-              </KanbanBoard>
-            </DragDropContext>
-          ) : (
+                    </ColumnHeader>
+                    <Droppable droppableId={column.status}>
+                      {(provided, snapshot) => (
+                        <ColumnTasks
+                          ref={provided.innerRef}
+                          {...provided.droppableProps}
+                          data-over={snapshot.isDraggingOver}
+                        >
+                          {columnTasks.map((task, index) => (
+                            <Draggable
+                              key={task._id}
+                              draggableId={task._id}
+                              index={index}
+                              isDragDisabled={!canUpdate}
+                            >
+                              {(dragProvided, dragSnapshot) => (
+                                <KanbanTask
+                                  ref={dragProvided.innerRef}
+                                  {...dragProvided.draggableProps}
+                                  {...dragProvided.dragHandleProps}
+                                  style={dragProvided.draggableProps.style}
+                                  data-dragging={dragSnapshot.isDragging}
+                                  onClick={() => cardActions.open(task)}
+                                  onKeyDown={openTaskOnEnter(task)}
+                                >
+                                  <TaskCardBody
+                                    task={task}
+                                    isDone={!!column.isDone}
+                                    nextStatus={column.next?.status || null}
+                                    nextTitle={column.next?.title || ''}
+                                    doneStatus={column.doneStatus}
+                                    reopenStatus={column.reopenStatus}
+                                    can={can}
+                                    actions={cardActions}
+                                  />
+                                </KanbanTask>
+                              )}
+                            </Draggable>
+                          ))}
+                          {provided.placeholder}
+                          {columnTasks.length === 0 && !inlineIsOpen && (
+                            <ColumnEmpty>{total === 0 ? 'No tasks' : 'No tasks match the filter'}</ColumnEmpty>
+                          )}
+                        </ColumnTasks>
+                      )}
+                    </Droppable>
+                    {canCreate && (
+                      <ColumnQuickAddWrap>
+                        {inlineIsOpen ? (
+                          <ColumnQuickAddForm
+                            onSubmit={(e) => submitInlineAdd(e, column.status)}
+                            aria-label={`Quick add task in ${column.title}`}
+                          >
+                            <ColumnQuickAddInput
+                              type="text"
+                              value={inlineDraft.title}
+                              onChange={(e) => updateInlineAddTitle(column.status, e.target.value)}
+                              placeholder="Task title"
+                              autoFocus
+                              disabled={inlineIsBusy}
+                              aria-label="Task title"
+                              onKeyDown={(e) => {
+                                if (e.key === 'Escape') cancelInlineAdd(column.status);
+                              }}
+                            />
+                            <ColumnQuickAddToolbar>
+                              <TaskImageAttachZone
+                                compact
+                                showLabel={false}
+                                attachments={inlineDraft.images}
+                                onFilesSelected={(files) => handleInlineImageFiles(files, column.status)}
+                                onRemove={(id) => removeInlineImage(column.status, id)}
+                                disabled={inlineIsBusy}
+                                busy={inlineReadingImages && inlineAttachColumn === column.status}
+                              />
+                              <ColumnQuickAddImageHint>
+                                {inlineDraft.images.length}/{TASK_IMAGE_MAX_COUNT} images
+                              </ColumnQuickAddImageHint>
+                            </ColumnQuickAddToolbar>
+                            <ColumnQuickAddActions>
+                              <span className="hint">Enter to add · Esc to cancel</span>
+                              <ColumnQuickAddAction
+                                type="button"
+                                onClick={() => cancelInlineAdd(column.status)}
+                                disabled={inlineIsBusy}
+                              >
+                                Cancel
+                              </ColumnQuickAddAction>
+                              <ColumnQuickAddAction
+                                type="submit"
+                                $primary
+                                disabled={inlineIsBusy || !String(inlineDraft.title || '').trim()}
+                              >
+                                {inlineIsSubmitting ? (
+                                  <>
+                                    <InlineSpinner />
+                                    Adding
+                                  </>
+                                ) : (
+                                  'Add'
+                                )}
+                              </ColumnQuickAddAction>
+                            </ColumnQuickAddActions>
+                          </ColumnQuickAddForm>
+                        ) : (
+                          <ColumnQuickAddTrigger type="button" onClick={() => openInlineAdd(column.status)}>
+                            <Plus size={14} />
+                            Add task
+                          </ColumnQuickAddTrigger>
+                        )}
+                      </ColumnQuickAddWrap>
+                    )}
+                  </KanbanColumn>
+                );
+              })}
+            </KanbanBoard>
+          </DragDropContext>
+        ) : (
+          <>
             <ListViewShell>
               <ListHeaderRow>
                 <div>Task</div>
                 <div>Status</div>
                 <div>Priority</div>
+                <div>Due</div>
                 <div>Assignees</div>
-                <div>Actions</div>
+                <div />
               </ListHeaderRow>
               {visibleTasks.map((task) => {
-                const assignees = task.assignees && task.assignees.length > 0
-                  ? task.assignees
-                  : (task.user ? [task.user] : []);
-                const plainDescription = task.description
-                  ? stripImagesFromHTML(task.description).replace(/<[^>]*>/g, '').trim()
-                  : '';
+                const statusCol = columnByStatus[task.status];
+                const preview = getTaskPreview(task.description);
+                const assignees = getTaskAssignees(task);
                 return (
-                  <ListRow key={task._id}>
+                  <ListRow
+                    key={task._id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => cardActions.open(task)}
+                    onKeyDown={openTaskOnEnter(task)}
+                  >
                     <div>
-                      <ListTaskTitle type="button" onClick={() => handleTaskClick(task)}>
-                        {task.title}
-                      </ListTaskTitle>
-                      {plainDescription ? (
-                        <ListTaskSub>
-                          {plainDescription.length > 120
-                            ? `${plainDescription.slice(0, 120)}...`
-                            : plainDescription}
-                        </ListTaskSub>
-                      ) : null}
-                      {task.dueDate ? (
-                        (() => {
-                          const variant = getDueVariant(task.dueDate) || 'upcoming';
-                          const text =
-                            variant === 'overdue'
-                              ? 'Overdue'
-                              : variant === 'today'
-                                ? 'Due today'
-                                : `Due ${formatDueLabel(task.dueDate)}`;
-                          return <DueBadge $variant={variant}>{text}</DueBadge>;
-                        })()
-                      ) : null}
+                      <ListTaskTitle>{task.title}</ListTaskTitle>
+                      {preview.text ? <ListTaskSub>{preview.text}</ListTaskSub> : null}
                     </div>
                     <div>
-                      <StatusChip
-                        style={{
-                          background: `${columnConfigs.find((c) => c.status === task.status)?.color || '#e2e8f0'}28`,
-                        }}
-                      >
-                        {columnConfigs.find((c) => c.status === task.status)?.title ||
-                          task.status.replace('-', ' ')}
-                      </StatusChip>
+                      <StatusTag $color={statusCol?.color}>
+                        <span className="dot" aria-hidden />
+                        {statusCol?.title || task.status}
+                      </StatusTag>
                     </div>
                     <div>
-                      <KanbanTaskPriorityBadge priority={task.priority}>{task.priority}</KanbanTaskPriorityBadge>
+                      <PriorityTag priority={task.priority} />
                     </div>
-                    <div style={{ fontSize: '12px', color: '#475569' }}>
-                      {assignees.length > 0
-                        ? assignees.slice(0, 2).map((a) => getUserDisplayName(a)).join(', ')
-                        : 'Unassigned'}
+                    <div>
+                      {task.dueDate ? <DueTag dueDate={task.dueDate} /> : <span className="muted">—</span>}
                     </div>
-                    <div>{renderTaskActions(task.status, task)}</div>
+                    <div>
+                      {assignees.length ? (
+                        <AssigneeStack assignees={assignees} />
+                      ) : (
+                        <span className="muted">Unassigned</span>
+                      )}
+                    </div>
+                    <div>
+                      <TaskRowActions task={task} columns={columnConfigs} can={can} actions={cardActions} />
+                    </div>
                   </ListRow>
                 );
               })}
               {visibleTasks.length === 0 && (
                 <EmptyState style={{ margin: 16 }}>
-                  <p style={{ fontSize: '13px' }}>No tasks match your current filters.</p>
+                  <h3>No tasks found</h3>
+                  <p>Change the filter or search, or create a task with N.</p>
                 </EmptyState>
               )}
             </ListViewShell>
-          )) : null}
-        </MainContent>
-      </ContentWrapper>
-
-      {showProjectsModal && (
-        <Modal
-          onClick={() => {
-            if (isSavingProject || isDeletingProjectId) return;
-            setShowProjectsModal(false);
-            cancelProjectEdit();
-          }}
-        >
-          <ModalContent onClick={(e) => e.stopPropagation()} style={{ maxWidth: '760px' }}>
-            <ModalHeader>
-              <h2>Manage Projects</h2>
-              <CloseButton
-                onClick={() => {
-                  if (isSavingProject || isDeletingProjectId) return;
-                  setShowProjectsModal(false);
-                  cancelProjectEdit();
-                }}
-              >
-                ×
-              </CloseButton>
-            </ModalHeader>
-
-            <ProjectManagerHeader>
-              <h3>{editingProjectId ? 'Edit project' : 'Create a new project'}</h3>
-              <p>
-                Projects group your tasks. You can switch project from the dropdown in this page.
-                {!canManageProjects ? ' You have view-only access here.' : ''}
-              </p>
-            </ProjectManagerHeader>
-
-            {canManageProjects && (
-              <ProjectManagerForm onSubmit={saveProject}>
-                <ProjectManagerInput
-                  type="text"
-                  value={projectForm.name}
-                  onChange={(e) => setProjectForm((prev) => ({ ...prev, name: e.target.value }))}
-                  placeholder="Project name"
-                  required
-                />
-                <ProjectManagerInput
-                  type="text"
-                  value={projectForm.description}
-                  onChange={(e) => setProjectForm((prev) => ({ ...prev, description: e.target.value }))}
-                  placeholder="Description (optional)"
-                />
-                <ProjectManagerSubmit type="submit" disabled={isSavingProject}>
-                  {isSavingProject ? 'Saving...' : editingProjectId ? 'Update' : 'Create'}
-                </ProjectManagerSubmit>
-              </ProjectManagerForm>
-            )}
-
-            {canManageProjects && editingProjectId && (
-              <div style={{ marginBottom: 12 }}>
-                <ModalButton
-                  type="button"
-                  className="secondary"
-                  onClick={cancelProjectEdit}
-                  disabled={isSavingProject}
-                >
-                  Cancel edit
-                </ModalButton>
-              </div>
-            )}
-
-            <ProjectManagerList>
-              {projects.length === 0 ? (
-                <EmptyState style={{ padding: '26px 14px' }}>
-                  <p style={{ fontSize: '13px' }}>No projects yet.</p>
-                </EmptyState>
-              ) : (
-                projects.map((project) => (
-                  <ProjectManagerItem key={project.id} $active={project.id === selectedProjectId}>
-                    <div>
-                      <div className="title">{project.name}</div>
-                      <div className="desc">{project.description || 'No description'}</div>
+            <MobileListView>
+              {visibleTasks.map((task) => {
+                const statusCol = columnByStatus[task.status];
+                const preview = getTaskPreview(task.description);
+                return (
+                  <MobileTaskCard key={task._id} type="button" onClick={() => cardActions.open(task)}>
+                    <p className="title">{task.title}</p>
+                    {preview.text ? <p className="sub">{preview.text}</p> : null}
+                    <div className="meta">
+                      <StatusTag $color={statusCol?.color}>
+                        <span className="dot" aria-hidden />
+                        {statusCol?.title || task.status}
+                      </StatusTag>
+                      <PriorityTag priority={task.priority} />
+                      <DueTag dueDate={task.dueDate} />
+                      <AssigneeStack assignees={getTaskAssignees(task)} />
                     </div>
-                    <ProjectManagerActions>
-                      <ProjectManagerAction
-                        type="button"
-                        onClick={() => {
-                          setSelectedProjectId(project.id);
-                          setShowProjectsModal(false);
-                        }}
-                        title="Select project"
-                      >
-                        <Check size={14} />
-                      </ProjectManagerAction>
-                      {canManageProjects && (
-                        <>
-                          <ProjectManagerAction
-                            type="button"
-                            onClick={() => startEditProject(project)}
-                            title="Edit project"
-                          >
-                            <Edit size={14} />
-                          </ProjectManagerAction>
-                          <ProjectManagerAction
-                            type="button"
-                            $danger
-                            onClick={() => deleteProject(project)}
-                            disabled={isDeletingProjectId === project.id}
-                            title="Delete project"
-                          >
-                            <Trash2 size={14} />
-                          </ProjectManagerAction>
-                        </>
-                      )}
-                    </ProjectManagerActions>
-                  </ProjectManagerItem>
-                ))
+                  </MobileTaskCard>
+                );
+              })}
+              {visibleTasks.length === 0 && (
+                <EmptyState>
+                  <h3>No tasks found</h3>
+                  <p>Change the filter or search.</p>
+                </EmptyState>
               )}
-            </ProjectManagerList>
-          </ModalContent>
-        </Modal>
+            </MobileListView>
+          </>
+        )
+      ) : null}
+      </>
       )}
 
-      {showAddModal && (
-        <Modal onClick={closeAddModal}>
-          <ModalContent onClick={(e) => e.stopPropagation()}>
-            {isCreatingTask && (
-              <ModalLoaderOverlay>
-                <LoadingContent>
-                  <LoaderSpinner />
-                  <LoaderText>
-                    <span>⏳</span>
-                    Creating task, please wait...
-                  </LoaderText>
-                </LoadingContent>
-              </ModalLoaderOverlay>
-            )}
-            <ModalHeader>
-              <h2>Create New Task</h2>
-              <CloseButton onClick={closeAddModal}>×</CloseButton>
-            </ModalHeader>
-            <ModalForm onSubmit={addTask}>
-              <FormGroup>
-                <label>Task Title</label>
-                <input
-                  type="text"
-                  value={newTask}
-                  onChange={(e) => setNewTask(e.target.value)}
-                  placeholder="Enter task title..."
-                  required
-                  autoFocus
-                />
-              </FormGroup>
-              <FormGroup>
-                <label>Description</label>
-                <AddDescriptionTextarea
-                  value={newDescription}
-                  onChange={(e) => setNewDescription(e.target.value)}
-                  placeholder="Add details (plain text). You can use full formatting when you edit the task after it is created."
-                  rows={5}
-                />
-              </FormGroup>
-              <PrioritySection>
-                <PriorityLabel>Priority:</PriorityLabel>
-                <PriorityButtons>
-                  <PriorityButton
-                    active={newPriority === 'low'}
-                    onClick={(e) => { e.preventDefault(); setNewPriority('low'); }}
-                    {...priorityColors.low}
-                  >
-                    Low
-                  </PriorityButton>
-                  <PriorityButton
-                    active={newPriority === 'medium'}
-                    onClick={(e) => { e.preventDefault(); setNewPriority('medium'); }}
-                    {...priorityColors.medium}
-                  >
-                    Medium
-                  </PriorityButton>
-                  <PriorityButton
-                    active={newPriority === 'high'}
-                    onClick={(e) => { e.preventDefault(); setNewPriority('high'); }}
-                    {...priorityColors.high}
-                  >
-                    High
-                  </PriorityButton>
-                  <PriorityButton
-                    active={newPriority === 'urgent'}
-                    onClick={(e) => { e.preventDefault(); setNewPriority('urgent'); }}
-                    {...priorityColors.urgent}
-                  >
-                    Urgent
-                  </PriorityButton>
-                </PriorityButtons>
-              </PrioritySection>
-              <FormGroup>
-                <label>Due date (optional)</label>
-                <input
-                  type="date"
-                  value={newDueDate}
-                  onChange={(e) => setNewDueDate(e.target.value)}
-                />
-              </FormGroup>
-              <ModalActions>
-                <ModalButton
-                  type="button"
-                  className="secondary"
-                  onClick={closeAddModal}
-                  disabled={isCreatingTask}
-                >
-                  Cancel
-                </ModalButton>
-                <ModalButton type="submit" className="primary" disabled={isCreatingTask}>
-                  {isCreatingTask && <InlineSpinner />}
-                  {isCreatingTask ? 'Creating...' : 'Create Task'}
-                </ModalButton>
-              </ModalActions>
-            </ModalForm>
-          </ModalContent>
-        </Modal>
-      )}
+      <TaskFormModal
+        mode="create"
+        open={showAddModal}
+        onClose={closeAddModal}
+        onSubmit={addTask}
+        title={newTask}
+        onTitleChange={setNewTask}
+        description={newDescription}
+        onDescriptionChange={setNewDescription}
+        priority={newPriority}
+        onPriorityChange={setNewPriority}
+        dueDate={newDueDate}
+        onDueDateChange={setNewDueDate}
+        isSubmitting={isCreatingTask}
+        attachments={newTaskImages}
+        onAttachmentsChange={setNewTaskImages}
+        onAttachFiles={handleCreateAttachFiles}
+        titleError={!newTask.trim() ? 'Task name is required' : undefined}
+      />
 
-      {editingTask && (
-        <Modal onClick={closeEditModal}>
-          <ModalContent onClick={(e) => e.stopPropagation()}>
-            <ModalHeader>
-              <h2>Edit Task</h2>
-              <CloseButton onClick={closeEditModal}>×</CloseButton>
-            </ModalHeader>
-            <ModalForm onSubmit={saveTask}>
-              <FormGroup>
-                <label>Title</label>
-                <input
-                  type="text"
-                  value={editForm.title}
-                  onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
-                  required
-                />
-              </FormGroup>
-              <FormGroup>
-                <label>Description</label>
-                <RichTextContainer>
-                  <ReactQuill
-                    ref={editQuillRef}
-                    value={editForm.description}
-                    onChange={(value) => setEditForm({ ...editForm, description: value })}
-                    modules={editModules}
-                    formats={formats}
-                  />
-                  {isUploadingImage && (
-                    <ImageUploadOverlay>
-                      <LoadingContent>
-                        <LoaderSpinner />
-                        <LoaderText>
-                          <span>📷</span>
-                          Uploading image...
-                        </LoaderText>
-                      </LoadingContent>
-                    </ImageUploadOverlay>
-                  )}
-                </RichTextContainer>
-              </FormGroup>
-              <PrioritySection>
-                <PriorityLabel>Priority:</PriorityLabel>
-                <PriorityButtons>
-                  <PriorityButton
-                    type="button"
-                    active={editForm.priority === 'low'}
-                    onClick={() => setEditForm({ ...editForm, priority: 'low' })}
-                    {...priorityColors.low}
-                  >
-                    Low
-                  </PriorityButton>
-                  <PriorityButton
-                    type="button"
-                    active={editForm.priority === 'medium'}
-                    onClick={() => setEditForm({ ...editForm, priority: 'medium' })}
-                    {...priorityColors.medium}
-                  >
-                    Medium
-                  </PriorityButton>
-                  <PriorityButton
-                    type="button"
-                    active={editForm.priority === 'high'}
-                    onClick={() => setEditForm({ ...editForm, priority: 'high' })}
-                    {...priorityColors.high}
-                  >
-                    High
-                  </PriorityButton>
-                  <PriorityButton
-                    type="button"
-                    active={editForm.priority === 'urgent'}
-                    onClick={() => setEditForm({ ...editForm, priority: 'urgent' })}
-                    {...priorityColors.urgent}
-                  >
-                    Urgent
-                  </PriorityButton>
-                </PriorityButtons>
-              </PrioritySection>
-              <StatusSection>
-                <StatusLabel>Status:</StatusLabel>
-                <StatusButtons>
-                  {kanbanColumns.map((c) => (
-                    <StatusButton
-                      key={c.id}
-                      type="button"
-                      value={c.id}
-                      active={editForm.status === c.id}
-                      onClick={() => setEditForm({ ...editForm, status: c.id })}
-                    >
-                      {c.label}
-                    </StatusButton>
-                  ))}
-                  {editForm.status &&
-                    !kanbanColumns.some((c) => c.id === editForm.status) && (
-                      <StatusButton type="button" active>
-                        {editForm.status} (legacy)
-                      </StatusButton>
-                    )}
-                </StatusButtons>
-              </StatusSection>
-              <FormGroup>
-                <label>Due date (optional)</label>
-                <input
-                  type="date"
-                  value={editForm.dueDate ? editForm.dueDate : ''}
-                  onChange={(e) => setEditForm({ ...editForm, dueDate: e.target.value })}
-                />
-              </FormGroup>
-              <ModalActions>
-                <ModalButton type="button" className="secondary" onClick={closeEditModal}>
-                  Cancel
-                </ModalButton>
-                <ModalButton type="submit" className="primary">
-                  Save Changes
-                </ModalButton>
-              </ModalActions>
-            </ModalForm>
-          </ModalContent>
-        </Modal>
-      )}
+      <TaskFormModal
+        mode="edit"
+        open={!!editingTask}
+        onClose={closeEditModal}
+        onSubmit={saveTask}
+        title={editForm.title}
+        onTitleChange={(value) => setEditForm((prev) => ({ ...prev, title: value }))}
+        description={editForm.description}
+        onDescriptionChange={(value) => setEditForm((prev) => ({ ...prev, description: value }))}
+        priority={editForm.priority}
+        onPriorityChange={(value) => setEditForm((prev) => ({ ...prev, priority: value }))}
+        status={editForm.status}
+        onStatusChange={(value) => setEditForm((prev) => ({ ...prev, status: value }))}
+        dueDate={editForm.dueDate}
+        onDueDateChange={(value) => setEditForm((prev) => ({ ...prev, dueDate: value }))}
+        kanbanColumns={kanbanColumns}
+        isSubmitting={isSavingTask}
+        isUploadingImage={isUploadingImage}
+        quillRef={editQuillRef}
+        quillModules={editModules}
+        quillFormats={formats}
+        attachments={editAttachments}
+        onAttachmentsChange={handleEditAttachmentsChange}
+        onAttachFiles={handleEditAttachFiles}
+        titleError={!editForm.title.trim() ? 'Task name is required' : undefined}
+      />
 
-      {showImageModal && selectedTask && (
-        <Modal onClick={() => setShowImageModal(false)}>
-          <ModalContent onClick={(e) => e.stopPropagation()} style={{ maxWidth: '600px' }}>
-            <ModalHeader>
-              <h2>{selectedTask.title}</h2>
-              <CloseButton onClick={() => setShowImageModal(false)}>×</CloseButton>
-            </ModalHeader>
-            <div style={{ 
-              padding: '0',
-              maxHeight: '70vh',
-              overflowY: 'auto'
-            }}>
-              {selectedTask.description && (
-                <TaskPreviewContent 
-                  dangerouslySetInnerHTML={{ __html: selectedTask.description }}
-                />
-              )}
-              <div style={{ 
-                marginTop: '24px', 
-                paddingTop: '24px', 
-                borderTop: '2px solid #f1f5f9',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center'
-              }}>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <TaskBadge type="priority" value={selectedTask.priority}>
-                    {selectedTask.priority}
-                  </TaskBadge>
-                  <TaskBadge type="status" value={selectedTask.status}>
-                    {selectedTask.status}
-                  </TaskBadge>
-                </div>
-                <ModalActions style={{ margin: 0, padding: 0, border: 'none' }}>
-                  <ModalButton 
-                    className="secondary" 
-                    onClick={() => {
-                      setShowImageModal(false);
-                      openEditModal(selectedTask);
-                    }}
-                  >
-                    Edit
-                  </ModalButton>
-                </ModalActions>
-              </div>
-            </div>
-          </ModalContent>
-        </Modal>
+      {showImageModal && liveSelectedTask && (
+        <TaskDetailDrawer
+          task={liveSelectedTask}
+          status={columnByStatus[liveSelectedTask.status]}
+          project={projects.find((p) => p.id === liveSelectedTask.projectId)}
+          currentUser={user}
+          canEdit={canUpdate}
+          onEdit={() => {
+            setShowImageModal(false);
+            openEditModal(liveSelectedTask);
+          }}
+          onClose={() => setShowImageModal(false)}
+        />
       )}
 
       {showDeleteModal && taskToDelete && (
@@ -4006,8 +3119,8 @@ const TaskManagement = () => {
               <div className="task-info">
                 <div className="task-title">{taskToAssign.title}</div>
                 {selectedAssignees.length > 0 && (
-                  <div className="current-assignee" style={{ marginTop: '12px', padding: '12px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                    <div style={{ fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '8px' }}>
+                  <div className="current-assignee" style={{ marginTop: '12px', padding: '12px', background: 'var(--wp-surface-2)', borderRadius: '6px', border: '1px solid var(--wp-border)' }}>
+                    <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--wp-text-muted)', marginBottom: '8px' }}>
                       Selected Assignees ({selectedAssignees.length}):
                     </div>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
@@ -4022,9 +3135,9 @@ const TaskManagement = () => {
                               alignItems: 'center',
                               gap: '6px',
                               padding: '6px 10px',
-                              background: 'white',
+                              background: 'var(--wp-surface)',
                               borderRadius: '6px',
-                              border: '1px solid #e2e8f0',
+                              border: '1px solid var(--wp-border)',
                               fontSize: '12px'
                             }}
                           >
@@ -4032,7 +3145,7 @@ const TaskManagement = () => {
                               width: '20px',
                               height: '20px',
                               borderRadius: '6px',
-                              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                              background: 'var(--wp-primary)',
                               display: 'flex',
                               alignItems: 'center',
                               justifyContent: 'center',
@@ -4042,7 +3155,7 @@ const TaskManagement = () => {
                             }}>
                               {getUserInitials(assignee)}
                             </div>
-                            <span style={{ color: '#0f172a', fontWeight: 500 }}>
+                            <span style={{ color: 'var(--wp-text)', fontWeight: 500 }}>
                               {getUserDisplayName(assignee)}
                             </span>
                             <button
@@ -4053,7 +3166,7 @@ const TaskManagement = () => {
                               style={{
                                 background: 'none',
                                 border: 'none',
-                                color: '#ef4444',
+                                color: 'var(--wp-error)',
                                 cursor: 'pointer',
                                 padding: '2px',
                                 display: 'flex',
@@ -4087,7 +3200,7 @@ const TaskManagement = () => {
                   <div style={{ 
                     padding: '40px 20px', 
                     textAlign: 'center', 
-                    color: '#94a3b8',
+                    color: 'var(--wp-text-subtle)',
                     fontSize: '14px'
                   }}>
                     {userSearchQuery ? 'No users found' : 'No users available'}

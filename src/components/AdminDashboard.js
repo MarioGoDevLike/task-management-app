@@ -23,96 +23,74 @@ import {
 } from 'lucide-react';
 import { adminAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
-import { SectionLoader } from './AppLoader';
+import { KpiStripSkeleton, AdminTableSkeleton } from './AppLoader';
 
 const DashboardContainer = styled.div`
-  padding: 32px;
+  padding: 16px 20px 32px;
   max-width: 1600px;
   margin: 0 auto;
-  background: #f8fafc;
-  min-height: calc(100vh - 80px);
-`;
+  background: var(--wp-bg);
+  min-height: 100%;
 
-const Header = styled.div`
-  margin-bottom: 32px;
-  
-  h1 {
-    font-size: 32px;
-    font-weight: 800;
-    color: #0f172a;
-    margin: 0 0 8px 0;
-    letter-spacing: -0.5px;
-  }
-  
-  p {
-    font-size: 15px;
-    color: #64748b;
-    margin: 0;
+  @media (max-width: 768px) {
+    padding: 12px;
   }
 `;
 
 const StatsGrid = styled.div`
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 20px;
-  margin-bottom: 32px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
 `;
 
 const StatCard = styled.div`
-  background: white;
-  border-radius: 16px;
-  padding: 24px;
-  border: 1px solid #e2e8f0;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-  transition: all 0.2s ease;
-  
-  &:hover {
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-    transform: translateY(-2px);
-  }
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 12px;
+  align-items: center;
+  background: var(--wp-surface);
+  border-radius: var(--wp-radius-lg);
+  padding: 14px 16px;
+  border: 1px solid var(--wp-border);
 `;
 
 const StatHeader = styled.div`
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
-  
+  grid-row: span 2;
+
   .icon {
-    width: 48px;
-    height: 48px;
-    border-radius: 12px;
+    width: 36px;
+    height: 36px;
+    border-radius: var(--wp-radius);
     display: flex;
     align-items: center;
     justify-content: center;
-    background: ${({ bg }) => bg || '#eff6ff'};
-    color: ${({ color }) => color || '#2563eb'};
   }
 `;
 
 const StatValue = styled.div`
-  font-size: 32px;
-  font-weight: 800;
-  color: #0f172a;
-  margin-bottom: 4px;
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.1;
+  color: var(--wp-text);
 `;
 
 const StatLabel = styled.div`
-  font-size: 14px;
-  color: #64748b;
+  font-size: 12px;
+  color: var(--wp-text-subtle);
   font-weight: 500;
 `;
 
 const FiltersBar = styled.div`
-  background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
-  border-radius: 16px;
-  padding: 24px;
-  margin-bottom: 24px;
-  border: 1px solid #e2e8f0;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  background: var(--wp-surface);
+  border-radius: var(--wp-radius-lg);
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  border: 1px solid var(--wp-border);
   display: flex;
   flex-wrap: wrap;
-  gap: 16px;
+  gap: 12px;
   align-items: flex-end;
 `;
 
@@ -127,7 +105,7 @@ const FilterGroup = styled.div`
 const FilterLabel = styled.label`
   font-size: 12px;
   font-weight: 600;
-  color: #475569;
+  color: var(--wp-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   display: flex;
@@ -146,23 +124,23 @@ const SearchInput = styled.div`
   input {
     width: 100%;
     padding: 14px 16px 14px 48px;
-    border: 2px solid #e2e8f0;
-    border-radius: 12px;
+    border: 2px solid var(--wp-border);
+    border-radius: var(--wp-radius-lg);
     font-size: 14px;
-    color: #0f172a;
-    background: white;
+    color: var(--wp-text);
+    background: var(--wp-surface);
     transition: all 0.2s ease;
     font-weight: 500;
     
     &:focus {
       outline: none;
-      border-color: #3b82f6;
+      border-color: var(--wp-primary);
       box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
-      background: #ffffff;
+      background: var(--wp-surface);
     }
     
     &::placeholder {
-      color: #94a3b8;
+      color: var(--wp-text-subtle);
       font-weight: 400;
     }
   }
@@ -172,18 +150,18 @@ const SearchInput = styled.div`
     left: 16px;
     top: calc(50% + 4px);
     transform: translateY(-50%);
-    color: #94a3b8;
+    color: var(--wp-text-subtle);
     pointer-events: none;
   }
 `;
 
 const Select = styled.select`
   padding: 14px 16px;
-  border: 1px solid #bfdbfe;
-  border-radius: 12px;
+  border: 1px solid var(--wp-primary-border);
+  border-radius: var(--wp-radius-lg);
   font-size: 14px;
-  color: #0f172a;
-  background: linear-gradient(135deg, #ffffff 0%, #eff6ff 100%);
+  color: var(--wp-text);
+  background: var(--wp-input-bg);
   cursor: pointer;
   transition: all 0.2s ease;
   font-weight: 600;
@@ -196,12 +174,12 @@ const Select = styled.select`
   
   &:focus {
     outline: none;
-    border-color: #60a5fa;
+    border-color: var(--wp-primary);
     box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.14);
   }
   
   &:hover {
-    border-color: #93c5fd;
+    border-color: var(--wp-primary-border);
     box-shadow: 0 2px 6px rgba(30, 64, 175, 0.1);
   }
   
@@ -213,12 +191,12 @@ const Select = styled.select`
 
 const ClearFiltersButton = styled.button`
   padding: 14px 20px;
-  border: 2px solid #e2e8f0;
-  border-radius: 12px;
+  border: 2px solid var(--wp-border);
+  border-radius: var(--wp-radius-lg);
   font-size: 14px;
   font-weight: 600;
-  color: #64748b;
-  background: white;
+  color: var(--wp-text-muted);
+  background: var(--wp-surface);
   cursor: pointer;
   transition: all 0.2s ease;
   display: flex;
@@ -227,9 +205,9 @@ const ClearFiltersButton = styled.button`
   white-space: nowrap;
   
   &:hover {
-    border-color: #ef4444;
-    color: #ef4444;
-    background: #fef2f2;
+    border-color: var(--wp-error);
+    color: var(--wp-error);
+    background: var(--wp-error-bg);
   }
   
   &:active {
@@ -238,11 +216,11 @@ const ClearFiltersButton = styled.button`
 `;
 
 const TasksTable = styled.div`
-  background: white;
-  border-radius: 16px;
-  border: 1px solid #e2e8f0;
+  background: var(--wp-surface);
+  border-radius: var(--wp-radius-lg);
+  border: 1px solid var(--wp-border);
   overflow: hidden;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  box-shadow: var(--wp-shadow-sm);
 `;
 
 const TableHeader = styled.div`
@@ -250,11 +228,11 @@ const TableHeader = styled.div`
   grid-template-columns: 2fr 1.5fr 1fr 1fr 1fr 1fr auto;
   gap: 16px;
   padding: 16px 24px;
-  background: #f8fafc;
-  border-bottom: 1px solid #e2e8f0;
+  background: var(--wp-surface-2);
+  border-bottom: 1px solid var(--wp-border);
   font-size: 12px;
   font-weight: 700;
-  color: #64748b;
+  color: var(--wp-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   
@@ -271,12 +249,12 @@ const TableRow = styled.div`
   grid-template-columns: 2fr 1.5fr 1fr 1fr 1fr 1fr auto;
   gap: 16px;
   padding: 20px 24px;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid var(--wp-border-subtle);
   align-items: center;
   transition: background 0.15s ease;
   
   &:hover {
-    background: #f8fafc;
+    background: var(--wp-surface-2);
   }
   
   &:last-child {
@@ -293,13 +271,13 @@ const TableRow = styled.div`
 
 const TaskTitle = styled.div`
   font-weight: 600;
-  color: #0f172a;
+  color: var(--wp-text);
   font-size: 14px;
   line-height: 1.5;
   
   .description {
     font-size: 12px;
-    color: #64748b;
+    color: var(--wp-text-muted);
     margin-top: 4px;
     font-weight: 400;
     display: -webkit-box;
@@ -314,17 +292,17 @@ const UserBadge = styled.div`
   align-items: center;
   gap: 8px;
   font-size: 13px;
-  color: #475569;
+  color: var(--wp-text-muted);
   
   .avatar {
     width: 32px;
     height: 32px;
     border-radius: 8px;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: var(--wp-primary);
     display: flex;
     align-items: center;
     justify-content: center;
-    color: white;
+    color: var(--wp-on-primary);
     font-weight: 600;
     font-size: 12px;
   }
@@ -357,10 +335,10 @@ const PriorityBadge = styled.span`
 
 const ActionButton = styled.button`
   padding: 8px 12px;
-  border: 1.5px solid #e2e8f0;
+  border: 1.5px solid var(--wp-border);
   border-radius: 8px;
-  background: white;
-  color: #475569;
+  background: var(--wp-surface);
+  color: var(--wp-text-muted);
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
@@ -370,9 +348,9 @@ const ActionButton = styled.button`
   transition: all 0.15s ease;
   
   &:hover {
-    border-color: #3b82f6;
-    color: #2563eb;
-    background: #eff6ff;
+    border-color: var(--wp-primary);
+    color: var(--wp-primary);
+    background: var(--wp-primary-muted);
   }
   
   &:disabled {
@@ -396,8 +374,8 @@ const ModalOverlay = styled.div`
 `;
 
 const ModalContent = styled.div`
-  background: white;
-  border-radius: 16px;
+  background: var(--wp-surface);
+  border-radius: var(--wp-radius-lg);
   padding: 24px;
   max-width: ${props => props.large ? '700px' : '500px'};
   width: 100%;
@@ -415,14 +393,14 @@ const ModalHeader = styled.div`
   h2 {
     font-size: 20px;
     font-weight: 700;
-    color: #0f172a;
+    color: var(--wp-text);
     margin: 0;
   }
   
   button {
     border: none;
     background: none;
-    color: #94a3b8;
+    color: var(--wp-text-subtle);
     cursor: pointer;
     padding: 4px;
     display: flex;
@@ -430,8 +408,8 @@ const ModalHeader = styled.div`
     border-radius: 6px;
     
     &:hover {
-      background: #f1f5f9;
-      color: #64748b;
+      background: var(--wp-surface-2);
+      color: var(--wp-text-muted);
     }
   }
 `;
@@ -446,9 +424,9 @@ const UserList = styled.div`
 
 const UserOption = styled.button`
   padding: 12px 16px;
-  border: 1.5px solid #e2e8f0;
-  border-radius: 10px;
-  background: white;
+  border: 1.5px solid var(--wp-border);
+  border-radius: var(--wp-radius-lg);
+  background: var(--wp-surface);
   text-align: left;
   cursor: pointer;
   transition: all 0.15s ease;
@@ -457,24 +435,24 @@ const UserOption = styled.button`
   gap: 12px;
   
   &:hover {
-    border-color: #3b82f6;
-    background: #eff6ff;
+    border-color: var(--wp-primary);
+    background: var(--wp-primary-muted);
   }
   
   &.selected {
-    border-color: #2563eb;
-    background: #eff6ff;
+    border-color: var(--wp-primary);
+    background: var(--wp-primary-muted);
   }
   
   .avatar {
     width: 40px;
     height: 40px;
-    border-radius: 10px;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: var(--wp-radius-lg);
+    background: var(--wp-primary);
     display: flex;
     align-items: center;
     justify-content: center;
-    color: white;
+    color: var(--wp-on-primary);
     font-weight: 600;
     font-size: 14px;
     flex-shrink: 0;
@@ -485,14 +463,14 @@ const UserOption = styled.button`
     
     .name {
       font-weight: 600;
-      color: #0f172a;
+      color: var(--wp-text);
       font-size: 14px;
       margin-bottom: 2px;
     }
     
     .email {
       font-size: 12px;
-      color: #64748b;
+      color: var(--wp-text-muted);
     }
   }
 `;
@@ -500,17 +478,17 @@ const UserOption = styled.button`
 const EmptyState = styled.div`
   text-align: center;
   padding: 60px 20px;
-  color: #64748b;
+  color: var(--wp-text-muted);
   
   svg {
     margin: 0 auto 16px;
-    color: #cbd5e1;
+    color: var(--wp-border-strong);
   }
   
   h3 {
     font-size: 18px;
     font-weight: 600;
-    color: #475569;
+    color: var(--wp-text-muted);
     margin: 0 0 8px 0;
   }
   
@@ -525,13 +503,13 @@ const Pagination = styled.div`
   align-items: center;
   justify-content: space-between;
   padding: 20px 24px;
-  border-top: 1px solid #e2e8f0;
-  background: #f8fafc;
+  border-top: 1px solid var(--wp-border);
+  background: var(--wp-surface-2);
 `;
 
 const PaginationInfo = styled.div`
   font-size: 14px;
-  color: #64748b;
+  color: var(--wp-text-muted);
 `;
 
 const PaginationButtons = styled.div`
@@ -541,19 +519,19 @@ const PaginationButtons = styled.div`
 
 const PaginationButton = styled.button`
   padding: 8px 12px;
-  border: 1.5px solid #e2e8f0;
+  border: 1.5px solid var(--wp-border);
   border-radius: 8px;
-  background: white;
-  color: #475569;
+  background: var(--wp-surface);
+  color: var(--wp-text-muted);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.15s ease;
   
   &:hover:not(:disabled) {
-    border-color: #3b82f6;
-    color: #2563eb;
-    background: #eff6ff;
+    border-color: var(--wp-primary);
+    color: var(--wp-primary);
+    background: var(--wp-primary-muted);
   }
   
   &:disabled {
@@ -562,9 +540,9 @@ const PaginationButton = styled.button`
   }
   
   &.active {
-    border-color: #2563eb;
-    background: #2563eb;
-    color: white;
+    border-color: var(--wp-primary);
+    background: var(--wp-primary);
+    color: var(--wp-on-primary);
   }
 `;
 
@@ -578,7 +556,7 @@ const TaskPreviewSection = styled.div`
   .label {
     font-size: 12px;
     font-weight: 700;
-    color: #64748b;
+    color: var(--wp-text-muted);
     text-transform: uppercase;
     letter-spacing: 0.5px;
     margin-bottom: 8px;
@@ -589,15 +567,15 @@ const TaskPreviewSection = styled.div`
   
   .value {
     font-size: 15px;
-    color: #0f172a;
+    color: var(--wp-text);
     line-height: 1.6;
   }
   
   .description {
-    background: #f8fafc;
+    background: var(--wp-surface-2);
     padding: 16px;
     border-radius: 8px;
-    border: 1px solid #e2e8f0;
+    border: 1px solid var(--wp-border);
     white-space: pre-wrap;
     word-wrap: break-word;
   }
@@ -613,8 +591,8 @@ const TaskPreviewSection = styled.div`
     align-items: center;
     gap: 4px;
     padding: 6px 12px;
-    background: #eff6ff;
-    color: #2563eb;
+    background: var(--wp-primary-muted);
+    color: var(--wp-primary);
     border-radius: 6px;
     font-size: 13px;
     font-weight: 500;
@@ -625,7 +603,7 @@ const TaskPreviewSection = styled.div`
     align-items: center;
     gap: 12px;
     padding: 12px 0;
-    border-bottom: 1px solid #f1f5f9;
+    border-bottom: 1px solid var(--wp-border-subtle);
     
     &:last-child {
       border-bottom: none;
@@ -634,14 +612,14 @@ const TaskPreviewSection = styled.div`
   
   .info-label {
     font-size: 14px;
-    color: #64748b;
+    color: var(--wp-text-muted);
     min-width: 120px;
     font-weight: 500;
   }
   
   .info-value {
     font-size: 14px;
-    color: #0f172a;
+    color: var(--wp-text);
     font-weight: 500;
   }
 `;
@@ -785,10 +763,10 @@ const AdminDashboard = () => {
 
   const getStatusBadge = (status) => {
     const configs = {
-      pending: { bg: '#fef3c7', color: '#92400e', icon: Clock },
-      'in-progress': { bg: '#dbeafe', color: '#1e40af', icon: TrendingUp },
-      completed: { bg: '#d1fae5', color: '#065f46', icon: CheckCircle2 },
-      cancelled: { bg: '#fee2e2', color: '#991b1b', icon: XCircle },
+      pending: { bg: 'var(--wp-warning-bg)', color: 'var(--wp-warning)', icon: Clock },
+      'in-progress': { bg: 'var(--wp-primary-muted)', color: 'var(--wp-primary)', icon: TrendingUp },
+      completed: { bg: 'var(--wp-success-bg)', color: 'var(--wp-success)', icon: CheckCircle2 },
+      cancelled: { bg: 'var(--wp-error-bg)', color: 'var(--wp-error)', icon: XCircle },
     };
     const config = configs[status] || configs.pending;
     const Icon = config.icon;
@@ -802,10 +780,10 @@ const AdminDashboard = () => {
 
   const getPriorityBadge = (priority) => {
     const configs = {
-      low: { bg: '#f1f5f9', color: '#475569' },
-      medium: { bg: '#fef3c7', color: '#92400e' },
+      low: { bg: 'var(--wp-surface-2)', color: 'var(--wp-text-muted)' },
+      medium: { bg: 'var(--wp-warning-bg)', color: 'var(--wp-warning)' },
       high: { bg: '#fed7aa', color: '#9a3412' },
-      urgent: { bg: '#fee2e2', color: '#991b1b' },
+      urgent: { bg: 'var(--wp-error-bg)', color: 'var(--wp-error)' },
     };
     const config = configs[priority] || configs.medium;
     return (
@@ -860,11 +838,11 @@ const AdminDashboard = () => {
     return (
       <DashboardContainer>
         <div style={{ textAlign: 'center', padding: '60px 20px' }}>
-          <AlertCircle size={48} color="#ef4444" style={{ margin: '0 auto 16px' }} />
-          <h2 style={{ fontSize: '20px', fontWeight: 600, color: '#0f172a', marginBottom: '8px' }}>
+          <AlertCircle size={48} color="var(--wp-error)" style={{ margin: '0 auto 16px' }} />
+          <h2 style={{ fontSize: '20px', fontWeight: 600, color: 'var(--wp-text)', marginBottom: '8px' }}>
             Access Denied
           </h2>
-          <p style={{ color: '#64748b' }}>You need administrator privileges to access this page.</p>
+          <p style={{ color: 'var(--wp-text-muted)' }}>You need administrator privileges to access this page.</p>
         </div>
       </DashboardContainer>
     );
@@ -872,19 +850,14 @@ const AdminDashboard = () => {
 
   return (
     <DashboardContainer>
-      <Header>
-        <h1>Admin Dashboard</h1>
-        <p>Manage all tasks, assignments, and monitor team productivity</p>
-      </Header>
-
       {loadingStats ? (
-          <SectionLoader message="Loading statistics" minHeight="220px" />
+          <KpiStripSkeleton count={4} />
       ) : stats && (
         <StatsGrid>
           <StatCard>
             <StatHeader>
-              <div className="icon" style={{ background: '#eff6ff', color: '#2563eb' }}>
-                <FileText size={24} />
+              <div className="icon" style={{ background: 'var(--wp-primary-muted)', color: 'var(--wp-primary)' }}>
+                <FileText size={18} />
               </div>
             </StatHeader>
             <StatValue>{stats.overview.total}</StatValue>
@@ -892,8 +865,8 @@ const AdminDashboard = () => {
           </StatCard>
           <StatCard>
             <StatHeader>
-              <div className="icon" style={{ background: '#fef3c7', color: '#92400e' }}>
-                <Clock size={24} />
+              <div className="icon" style={{ background: 'var(--wp-warning-bg)', color: 'var(--wp-warning)' }}>
+                <Clock size={18} />
               </div>
             </StatHeader>
             <StatValue>{stats.overview.pending}</StatValue>
@@ -901,8 +874,8 @@ const AdminDashboard = () => {
           </StatCard>
           <StatCard>
             <StatHeader>
-              <div className="icon" style={{ background: '#dbeafe', color: '#1e40af' }}>
-                <TrendingUp size={24} />
+              <div className="icon" style={{ background: 'var(--wp-info-bg)', color: 'var(--wp-info)' }}>
+                <TrendingUp size={18} />
               </div>
             </StatHeader>
             <StatValue>{stats.overview.inProgress}</StatValue>
@@ -910,8 +883,8 @@ const AdminDashboard = () => {
           </StatCard>
           <StatCard>
             <StatHeader>
-              <div className="icon" style={{ background: '#d1fae5', color: '#065f46' }}>
-                <CheckCircle2 size={24} />
+              <div className="icon" style={{ background: 'var(--wp-success-bg)', color: 'var(--wp-success)' }}>
+                <CheckCircle2 size={18} />
               </div>
             </StatHeader>
             <StatValue>{stats.overview.completed}</StatValue>
@@ -1033,7 +1006,7 @@ const AdminDashboard = () => {
         </TableHeader>
 
         {loading ? (
-          <SectionLoader message="Loading tasks" minHeight="260px" />
+          <AdminTableSkeleton bare />
         ) : tasks.length === 0 ? (
           <EmptyState>
             <FileText size={48} />
@@ -1052,11 +1025,11 @@ const AdminDashboard = () => {
                     {getUserInitials(task.user)}
                   </div>
                   <div>
-                    <div style={{ fontWeight: 600, color: '#0f172a' }}>
+                    <div style={{ fontWeight: 600, color: 'var(--wp-text)' }}>
                       {getUserDisplayName(task.user)}
                     </div>
                     {task.user?.email && (
-                      <div style={{ fontSize: '11px', color: '#94a3b8' }}>
+                      <div style={{ fontSize: '11px', color: 'var(--wp-text-subtle)' }}>
                         {task.user.email}
                       </div>
                     )}
@@ -1064,10 +1037,10 @@ const AdminDashboard = () => {
                 </UserBadge>
                 <div>{getStatusBadge(task.status)}</div>
                 <div>{getPriorityBadge(task.priority)}</div>
-                <div className="hide-mobile" style={{ fontSize: '13px', color: '#64748b' }}>
+                <div className="hide-mobile" style={{ fontSize: '13px', color: 'var(--wp-text-muted)' }}>
                   {task.dueDate ? new Date(task.dueDate).toLocaleDateString() : '-'}
                 </div>
-                <div className="hide-mobile" style={{ fontSize: '13px', color: '#64748b' }}>
+                <div className="hide-mobile" style={{ fontSize: '13px', color: 'var(--wp-text-muted)' }}>
                   {new Date(task.createdAt).toLocaleDateString()}
                 </div>
                 <div>
@@ -1138,13 +1111,13 @@ const AdminDashboard = () => {
               </button>
             </ModalHeader>
             <div style={{ marginBottom: '20px' }}>
-              <div style={{ fontSize: '14px', color: '#64748b', marginBottom: '8px' }}>Task:</div>
-              <div style={{ fontSize: '16px', fontWeight: 600, color: '#0f172a' }}>
+              <div style={{ fontSize: '14px', color: 'var(--wp-text-muted)', marginBottom: '8px' }}>Task:</div>
+              <div style={{ fontSize: '16px', fontWeight: 600, color: 'var(--wp-text)' }}>
                 {selectedTask?.title}
               </div>
             </div>
             <div style={{ marginBottom: '20px' }}>
-              <div style={{ fontSize: '14px', fontWeight: 600, color: '#0f172a', marginBottom: '12px' }}>
+              <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--wp-text)', marginBottom: '12px' }}>
                 Select User:
               </div>
               <UserList>
@@ -1180,9 +1153,9 @@ const AdminDashboard = () => {
                 onClick={handleConfirmAssign}
                 disabled={!assigningUserId || isAssigning}
                 style={{
-                  background: '#2563eb',
+                  background: 'var(--wp-primary)',
                   color: 'white',
-                  borderColor: '#2563eb',
+                  borderColor: 'var(--wp-primary)',
                 }}
               >
                 {isAssigning ? (
@@ -1252,18 +1225,18 @@ const AdminDashboard = () => {
                         {getUserInitials(previewTask.user)}
                       </div>
                       <div>
-                        <div style={{ fontWeight: 600, color: '#0f172a' }}>
+                        <div style={{ fontWeight: 600, color: 'var(--wp-text)' }}>
                           {getUserDisplayName(previewTask.user)}
                         </div>
                         {previewTask.user?.email && (
-                          <div style={{ fontSize: '12px', color: '#94a3b8' }}>
+                          <div style={{ fontSize: '12px', color: 'var(--wp-text-subtle)' }}>
                             {previewTask.user.email}
                           </div>
                         )}
                       </div>
                     </UserBadge>
                   ) : (
-                    <span style={{ color: '#94a3b8' }}>Unassigned</span>
+                    <span style={{ color: 'var(--wp-text-subtle)' }}>Unassigned</span>
                   )}
                 </div>
               </div>
@@ -1350,7 +1323,7 @@ const AdminDashboard = () => {
               </TaskPreviewSection>
             )}
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '24px', paddingTop: '24px', borderTop: '1px solid #e2e8f0' }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '24px', paddingTop: '24px', borderTop: '1px solid var(--wp-border)' }}>
               <ActionButton onClick={() => setShowPreviewModal(false)}>
                 Close
               </ActionButton>

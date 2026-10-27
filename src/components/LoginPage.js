@@ -3,140 +3,228 @@ import styled from 'styled-components';
 import { useForm } from 'react-hook-form';
 import { authAPI } from '../services/api';
 import { toast } from 'react-hot-toast';
+import { InlineLoader } from './AppLoader';
+import ThemeToggle from './ThemeToggle';
 
 const Container = styled.div`
   min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(380px, 1fr) minmax(420px, 560px);
+  background: var(--wp-bg);
+
+  @media (max-width: 900px) {
+    grid-template-columns: 1fr;
+  }
+`;
+
+const BrandPanel = styled.aside`
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 40px 48px;
+  overflow: hidden;
+  background-color: #15181d;
+  /* Blueprint grid: fine 16px lines with a stronger 80px major grid. */
+  background-image:
+    linear-gradient(rgba(106, 161, 255, 0.09) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(106, 161, 255, 0.09) 1px, transparent 1px),
+    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+  background-size: 80px 80px, 80px 80px, 16px 16px, 16px 16px;
+  color: #aab2bf;
+
+  @media (max-width: 900px) {
+    display: none;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: #f1f3f6;
+    font-weight: 700;
+    font-size: 15px;
+  }
+
+  h2 {
+    margin: 0 0 12px;
+    max-width: 440px;
+    font-size: 30px;
+    line-height: 1.2;
+    font-weight: 600;
+    color: #f1f3f6;
+  }
+
+  p {
+    margin: 0;
+    max-width: 420px;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  ul {
+    margin: 28px 0 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 10px;
+    font-size: 13px;
+  }
+
+  li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+
+    &::before {
+      content: '';
+      width: 6px;
+      height: 6px;
+      border-radius: 1px;
+      background: #6aa1ff;
+    }
+  }
+
+  .foot {
+    font-size: 12px;
+    color: #737c89;
+  }
+`;
+
+const LogoMark = styled.div`
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  background: var(--wp-primary);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-family: var(--wp-font-mono);
+  font-weight: 700;
+  font-size: 13px;
+`;
+
+const FormPanel = styled.main`
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #fafbfc;
-  padding: 24px;
+  padding: 48px 32px;
+  background: var(--wp-surface);
+  border-left: 1px solid var(--wp-border);
+
+  @media (max-width: 900px) {
+    border-left: none;
+    background: var(--wp-bg);
+    padding: 32px 20px;
+  }
 `;
 
-const Card = styled.div`
-  background: white;
-  border-radius: 16px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03), 0 2px 4px rgba(0, 0, 0, 0.03);
-  padding: 48px;
+const TopBar = styled.div`
+  position: absolute;
+  top: 16px;
+  right: 16px;
+`;
+
+const FormInner = styled.div`
   width: 100%;
-  max-width: 420px;
-  border: 1px solid #e8ecf0;
-`;
+  max-width: 360px;
 
-const Logo = styled.div`
-  margin-bottom: 32px;
-  
-  h1 {
-    font-size: 28px;
-    font-weight: 600;
-    color: #0f172a;
-    margin: 0 0 8px 0;
+  .mobile-brand {
+    display: none;
+    margin-bottom: 24px;
+
+    @media (max-width: 900px) {
+      display: block;
     }
-  
-  p {
-    color: #64748b;
+  }
+
+  h1 {
+    margin: 0 0 6px;
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--wp-text);
+  }
+
+  .lead {
+    margin: 0 0 28px;
     font-size: 14px;
-    margin: 0;
+    color: var(--wp-text-muted);
+  }
+
+  .help {
+    margin: 20px 0 0;
+    font-size: 12px;
+    color: var(--wp-text-subtle);
   }
 `;
 
 const Form = styled.form`
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 16px;
 `;
 
 const FormGroup = styled.div`
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 `;
 
 const Label = styled.label`
   font-weight: 500;
-  color: #334155;
-  font-size: 14px;
+  color: var(--wp-text);
+  font-size: 13px;
 `;
 
 const Input = styled.input`
-  padding: 14px 16px;
-  border: 1.5px solid #e2e8f0;
-  border-radius: 12px;
-  font-size: 15px;
-  transition: all 0.15s ease;
-  background: #fafbfc;
-  color: #0f172a;
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid ${(p) => (p.$error ? 'var(--wp-error)' : 'var(--wp-input-border)')};
+  border-radius: var(--wp-radius);
+  font-size: 14px;
+  background: var(--wp-input-bg);
+  color: var(--wp-text);
 
   &:focus {
     outline: none;
-    border-color: #3b82f6;
-    background: white;
-    box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.08);
-  }
-
-  &:hover {
-    border-color: #cbd5e1;
+    border-color: ${(p) => (p.$error ? 'var(--wp-error)' : 'var(--wp-primary)')};
+    box-shadow: 0 0 0 3px ${(p) => (p.$error ? 'var(--wp-error-bg)' : 'var(--wp-focus-ring)')};
   }
 
   &::placeholder {
-    color: #94a3b8;
+    color: var(--wp-input-placeholder);
   }
-
-  ${(props) =>
-    props.error &&
-    `
-    border-color: #ef4444;
-    background: #fef2f2;
-    
-    &:focus {
-      box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.08);
-    }
-  `}
 `;
 
 const ErrorMessage = styled.span`
-  color: #ef4444;
-  font-size: 13px;
-  margin-top: -4px;
+  color: var(--wp-error);
+  font-size: 12px;
 `;
 
 const Button = styled.button`
-  background: #3b82f6;
-  color: white;
-  border: none;
-  padding: 14px 20px;
-  border-radius: 12px;
-  font-size: 15px;
+  height: 40px;
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--wp-primary);
+  border-radius: var(--wp-radius);
+  background: var(--wp-primary);
+  color: var(--wp-on-primary);
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.15s ease;
-  margin-top: 8px;
 
   &:hover:not(:disabled) {
-    background: #2563eb;
-    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+    background: var(--wp-primary-hover);
+    border-color: var(--wp-primary-hover);
   }
 
   &:disabled {
-    opacity: 0.5;
+    opacity: 0.65;
     cursor: not-allowed;
-  }
-`;
-
-
-const LoadingSpinner = styled.div`
-  display: inline-block;
-  width: 18px;
-  height: 18px;
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  border-radius: 50%;
-  border-top-color: white;
-  animation: spin 0.8s linear infinite;
-
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
   }
 `;
 
@@ -149,10 +237,8 @@ const LoginPage = ({ onLogin }) => {
     try {
       const response = await authAPI.login(data);
       const { token, user } = response.data;
-
       localStorage.setItem('token', token);
       localStorage.setItem('user', JSON.stringify(user));
-
       toast.success('Welcome back!');
       onLogin(user);
     } catch (error) {
@@ -165,51 +251,76 @@ const LoginPage = ({ onLogin }) => {
 
   return (
     <Container>
-      <Card>
-        <Logo>
-          <h1>WorkPilot</h1>
-          <p>Sign in to continue</p>
-        </Logo>
+      <BrandPanel aria-hidden>
+        <div className="brand">
+          <LogoMark>WP</LogoMark>
+          WorkPilot
+        </div>
+        <div>
+          <h2>Engineering work, planned and delivered.</h2>
+          <p>One place for project boards, deadlines and team assignments.</p>
+          <ul>
+            <li>Project boards with drag-and-drop workflow</li>
+            <li>Due dates, priorities and overdue tracking</li>
+            <li>Role-based access for teams and admins</li>
+          </ul>
+        </div>
+        <div className="foot">© {new Date().getFullYear()} WorkPilot</div>
+      </BrandPanel>
 
-        <Form onSubmit={handleSubmit(onSubmit)}>
-          <FormGroup>
-            <Label htmlFor="email">Email</Label>
-            <Input
-              id="email"
-              type="email"
-              placeholder="you@example.com"
-              {...register('email', {
-                required: 'Email is required',
-                pattern: {
-                  value: /^\S+@\S+$/i,
-                  message: 'Invalid email address',
-                },
-              })}
-              error={errors.email}
-            />
-            {errors.email && <ErrorMessage>{errors.email.message}</ErrorMessage>}
-          </FormGroup>
+      <FormPanel>
+        <TopBar>
+          <ThemeToggle compact />
+        </TopBar>
+        <FormInner>
+          <div className="mobile-brand">
+            <LogoMark aria-hidden>WP</LogoMark>
+          </div>
+          <h1>Sign in</h1>
+          <p className="lead">Use your company account to access the workspace.</p>
 
-          <FormGroup>
-            <Label htmlFor="password">Password</Label>
-            <Input
-              id="password"
-              type="password"
-              placeholder="Enter your password"
-              {...register('password', {
-                required: 'Password is required',
-              })}
-              error={errors.password}
-            />
-            {errors.password && <ErrorMessage>{errors.password.message}</ErrorMessage>}
-          </FormGroup>
+          <Form onSubmit={handleSubmit(onSubmit)} noValidate>
+            <FormGroup>
+              <Label htmlFor="email">Work email</Label>
+              <Input
+                id="email"
+                type="email"
+                autoComplete="email"
+                autoFocus
+                placeholder="name@company.com"
+                aria-invalid={!!errors.email}
+                aria-describedby={errors.email ? 'email-error' : undefined}
+                {...register('email', {
+                  required: 'Email is required',
+                  pattern: { value: /^\S+@\S+$/i, message: 'Invalid email address' },
+                })}
+                $error={errors.email}
+              />
+              {errors.email && <ErrorMessage id="email-error" role="alert">{errors.email.message}</ErrorMessage>}
+            </FormGroup>
 
-          <Button type="submit" disabled={isLoading}>
-            {isLoading ? <LoadingSpinner /> : 'Sign In'}
-          </Button>
-        </Form>
+            <FormGroup>
+              <Label htmlFor="password">Password</Label>
+              <Input
+                id="password"
+                type="password"
+                autoComplete="current-password"
+                placeholder="Enter your password"
+                aria-invalid={!!errors.password}
+                aria-describedby={errors.password ? 'password-error' : undefined}
+                {...register('password', { required: 'Password is required' })}
+                $error={errors.password}
+              />
+              {errors.password && <ErrorMessage id="password-error" role="alert">{errors.password.message}</ErrorMessage>}
+            </FormGroup>
 
-      </Card>
+            <Button type="submit" disabled={isLoading}>
+              {isLoading ? <InlineLoader message="Signing in" /> : 'Sign in'}
+            </Button>
+          </Form>
+          <p className="help">Need access? Ask your workspace administrator for an account.</p>
+        </FormInner>
+      </FormPanel>
     </Container>
   );
 };

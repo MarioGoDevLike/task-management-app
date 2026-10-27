@@ -4,7 +4,7 @@ import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
 import interactionPlugin from '@fullcalendar/interaction';
-import { ChevronLeft, ChevronRight, Search, Settings, Plus } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { getDb } from '../firebase/app';
 import { useAuth } from '../contexts/AuthContext';
@@ -19,23 +19,29 @@ import {
   updateDoc,
   where,
 } from 'firebase/firestore';
-import { SectionLoader } from './AppLoader';
+import { CalendarGridSkeleton, ItemListSkeleton } from './AppLoader';
 
 const Container = styled.div`
-  min-height: 100vh;
-  background: #f5f7fb;
-  padding: 8px 10px;
+  min-height: 100%;
+  background: var(--wp-bg);
+  padding: 20px 20px 32px;
+
+  @media (max-width: 768px) {
+    padding: 12px;
+  }
 `;
 
 const TopBar = styled.div`
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
-  padding: 10px 14px;
+  margin-bottom: 12px;
+  background: var(--wp-surface);
+  border: 1px solid var(--wp-border);
+  border-radius: var(--wp-radius-lg);
+  padding: 12px 16px;
+  flex-wrap: wrap;
+  gap: 10px;
 `;
 
 const TopLeft = styled.div`
@@ -55,15 +61,15 @@ const AppTitle = styled.div`
   align-items: center;
   gap: 10px;
   font-weight: 600;
-  color: #374151;
+  color: var(--wp-text-muted);
 `;
 
 const CalendarBadge = styled.div`
-  width: 26px;
-  height: 26px;
-  border-radius: 7px;
-  background: linear-gradient(160deg, #4285f4, #1a73e8);
-  color: #fff;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--wp-primary);
+  color: var(--wp-on-primary);
   font-size: 11px;
   font-weight: 700;
   display: inline-flex;
@@ -72,9 +78,9 @@ const CalendarBadge = styled.div`
 `;
 
 const TodayButton = styled.button`
-  border: 1px solid #d1d5db;
-  background: #fff;
-  color: #374151;
+  border: 1px solid var(--wp-border);
+  background: var(--wp-surface);
+  color: var(--wp-text-muted);
   border-radius: 8px;
   height: 34px;
   padding: 0 14px;
@@ -86,9 +92,9 @@ const TodayButton = styled.button`
 const IconButton = styled.button`
   width: 34px;
   height: 34px;
-  border: 1px solid #d1d5db;
-  background: #fff;
-  color: #4b5563;
+  border: 1px solid var(--wp-border);
+  background: var(--wp-surface);
+  color: var(--wp-text-muted);
   border-radius: 8px;
   display: inline-flex;
   align-items: center;
@@ -100,52 +106,55 @@ const MainTitle = styled.h2`
   margin: 0;
   font-size: 26px;
   font-weight: 700;
-  color: #111827;
+  color: var(--wp-text);
 `;
 
 const ViewSelect = styled.select`
   height: 34px;
-  border-radius: 10px;
-  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  border: 1px solid var(--wp-input-border);
   padding: 0 34px 0 12px;
   font-size: 13px;
   font-weight: 600;
-  color: #0f172a;
+  color: var(--wp-text);
   appearance: none;
   cursor: pointer;
-  background: linear-gradient(135deg, #ffffff 0%, #eff6ff 100%);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='none' stroke='%2364748b' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round' d='M3 4.5 6 7.5 9 4.5'/%3E%3C/svg%3E");
+  background: var(--wp-input-bg);
+  box-shadow: var(--wp-shadow-sm);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='none' stroke='%2371717a' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round' d='M3 4.5 6 7.5 9 4.5'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 11px center;
   transition: all 0.18s ease;
 
   &:hover {
-    border-color: #93c5fd;
-    box-shadow: 0 2px 6px rgba(30, 64, 175, 0.1);
+    border-color: var(--wp-border-strong);
   }
 
   &:focus {
     outline: none;
-    border-color: #60a5fa;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.14);
+    border-color: var(--wp-primary);
+    box-shadow: 0 0 0 3px var(--wp-focus-ring);
   }
 `;
 
 const AddButton = styled.button`
-  background: #1a73e8;
-  color: #fff;
+  background: var(--wp-primary);
+  color: var(--wp-on-primary);
   border: none;
-  border-radius: 16px;
-  padding: 0 16px;
-  height: 38px;
+  border-radius: 8px;
+  padding: 0 14px;
+  height: 36px;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  box-shadow: 0 8px 18px rgba(26, 115, 232, 0.24);
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  transition: background 0.15s;
+
+  &:hover {
+    background: var(--wp-primary-hover);
+  }
 `;
 
 const Layout = styled.div`
@@ -159,9 +168,9 @@ const Layout = styled.div`
 `;
 
 const SidePanel = styled.aside`
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
+  background: var(--wp-surface);
+  border: 1px solid var(--wp-border);
+  border-radius: var(--wp-radius-lg);
   padding: 12px;
   height: fit-content;
 `;
@@ -170,7 +179,7 @@ const PanelTitle = styled.h3`
   margin: 0 0 12px;
   font-size: 14px;
   font-weight: 700;
-  color: #374151;
+  color: var(--wp-text-muted);
 `;
 
 const MiniHeader = styled.div`
@@ -183,9 +192,9 @@ const MiniHeader = styled.div`
     width: 28px;
     height: 28px;
     border-radius: 8px;
-    border: 1px solid #e5e7eb;
-    background: #fff;
-    color: #4b5563;
+    border: 1px solid var(--wp-border);
+    background: var(--wp-surface);
+    color: var(--wp-text-muted);
     cursor: pointer;
   }
 `;
@@ -193,15 +202,15 @@ const MiniHeader = styled.div`
 const MiniLabel = styled.div`
   font-size: 13px;
   font-weight: 700;
-  color: #111827;
+  color: var(--wp-text);
 `;
 
 const SearchPeople = styled.button`
   margin-top: 10px;
   width: 100%;
-  border: 1px solid #e5e7eb;
-  background: #f8fafc;
-  color: #4b5563;
+  border: 1px solid var(--wp-border);
+  background: var(--wp-surface-2);
+  color: var(--wp-text-muted);
   border-radius: 8px;
   height: 34px;
   font-size: 12px;
@@ -219,7 +228,7 @@ const Weekdays = styled.div`
   gap: 4px;
   margin-bottom: 6px;
   font-size: 11px;
-  color: #6b7280;
+  color: var(--wp-text-muted);
 
   span {
     text-align: center;
@@ -236,10 +245,15 @@ const DayCell = styled.button`
   border: none;
   border-radius: 8px;
   min-height: 32px;
-  background: ${(p) => (p.$isSelected ? '#1a73e8' : p.$isToday ? '#e8f0fe' : '#fff')};
-  color: ${(p) => (p.$isSelected ? '#fff' : p.$isCurrentMonth ? '#111827' : '#9ca3af')};
+  background: ${(p) => (p.$isSelected ? 'var(--wp-primary)' : p.$isToday ? 'var(--wp-primary-muted)' : 'transparent')};
+  color: ${(p) => (p.$isSelected ? 'var(--wp-on-primary)' : p.$isCurrentMonth ? 'var(--wp-text)' : 'var(--wp-text-subtle)')};
   font-size: 12px;
   cursor: pointer;
+  transition: background 0.15s;
+
+  &:hover {
+    background: ${(p) => (p.$isSelected ? 'var(--wp-primary)' : 'var(--wp-hover)')};
+  }
 `;
 
 const UpcomingList = styled.div`
@@ -251,48 +265,48 @@ const UpcomingList = styled.div`
 
 const UpcomingItem = styled.button`
   text-align: left;
-  border: 1px solid #e5e7eb;
-  border-left: 4px solid #1a73e8;
-  background: #fff;
-  border-radius: 10px;
+  border: 1px solid var(--wp-border);
+  border-left: 4px solid var(--wp-primary);
+  background: var(--wp-surface);
+  border-radius: var(--wp-radius-lg);
   padding: 8px 10px;
   cursor: pointer;
 
   .t {
     font-size: 12px;
     font-weight: 700;
-    color: #111827;
+    color: var(--wp-text);
   }
 
   .d {
     font-size: 11px;
-    color: #6b7280;
+    color: var(--wp-text-muted);
     margin-top: 3px;
   }
 `;
 
 const CalendarShell = styled.section`
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
+  background: var(--wp-surface);
+  border: 1px solid var(--wp-border);
+  border-radius: var(--wp-radius-lg);
   padding: 10px;
   min-width: 0;
 
   .fc {
-    --fc-border-color: #e5e7eb;
-    --fc-page-bg-color: #ffffff;
-    --fc-today-bg-color: #e8f0fe;
-    --fc-neutral-bg-color: #f8fafc;
-    --fc-event-bg-color: #1a73e8;
-    --fc-event-border-color: #1557b0;
-    --fc-button-bg-color: #ffffff;
-    --fc-button-border-color: #d1d5db;
-    --fc-button-text-color: #374151;
-    --fc-button-hover-bg-color: #f3f4f6;
-    --fc-button-hover-border-color: #cbd5e1;
-    --fc-button-active-bg-color: #e8f0fe;
-    --fc-button-active-border-color: #bfdbfe;
-    --fc-button-active-text-color: #1a73e8;
+    --fc-border-color: var(--wp-border);
+    --fc-page-bg-color: var(--wp-surface);
+    --fc-today-bg-color: var(--wp-primary-muted);
+    --fc-neutral-bg-color: var(--wp-surface-2);
+    --fc-event-bg-color: var(--wp-primary);
+    --fc-event-border-color: var(--wp-primary-hover);
+    --fc-button-bg-color: var(--wp-surface);
+    --fc-button-border-color: var(--wp-border);
+    --fc-button-text-color: var(--wp-text);
+    --fc-button-hover-bg-color: var(--wp-surface-2);
+    --fc-button-hover-border-color: var(--wp-border-strong);
+    --fc-button-active-bg-color: var(--wp-primary-muted);
+    --fc-button-active-border-color: var(--wp-primary);
+    --fc-button-active-text-color: var(--wp-primary);
     font-size: 13px;
   }
 
@@ -302,32 +316,32 @@ const CalendarShell = styled.section`
 
   .fc .fc-toolbar-title {
     font-size: 20px;
-    color: #1f2937;
+    color: var(--wp-text);
     font-weight: 700;
   }
 
   .fc .fc-button {
-    border-radius: 10px;
+    border-radius: var(--wp-radius-lg);
     box-shadow: none;
     font-weight: 600;
     text-transform: capitalize;
   }
 
   .fc .fc-col-header-cell-cushion {
-    color: #4b5563;
+    color: var(--wp-text-muted);
     font-weight: 600;
     padding: 10px 2px;
   }
 
   .fc-daygrid-day-number {
-    color: #1f2937;
+    color: var(--wp-text);
     font-weight: 500;
     padding: 6px 7px;
   }
 
   .fc .fc-daygrid-day.fc-day-today .fc-daygrid-day-number {
-    background: #1a73e8;
-    color: #fff;
+    background: var(--wp-primary);
+    color: var(--wp-on-primary);
     border-radius: 999px;
     width: 24px;
     height: 24px;
@@ -352,7 +366,7 @@ const CalendarShell = styled.section`
 const Modal = styled.div`
   position: fixed;
   inset: 0;
-  background: rgba(15, 23, 42, 0.55);
+  background: var(--wp-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -363,10 +377,10 @@ const ModalContent = styled.div`
   width: min(700px, 94vw);
   max-height: 90vh;
   overflow-y: auto;
-  background: #fff;
-  border-radius: 20px;
-  border: 1px solid #e5e7eb;
-  box-shadow: 0 30px 80px rgba(15, 23, 42, 0.32);
+  background: var(--wp-surface);
+  border-radius: var(--wp-radius-lg);
+  border: 1px solid var(--wp-border);
+  box-shadow: var(--wp-shadow-xl);
   padding: 28px;
 `;
 
@@ -379,7 +393,7 @@ const ModalHeader = styled.div`
   h2 {
     margin: 0;
     font-size: 20px;
-    color: #1f2937;
+    color: var(--wp-text);
   }
 `;
 
@@ -388,7 +402,7 @@ const CloseButton = styled.button`
   background: none;
   font-size: 30px;
   cursor: pointer;
-  color: #64748b;
+  color: var(--wp-text-muted);
 `;
 
 const Form = styled.form`
@@ -404,13 +418,13 @@ const Group = styled.div`
 
   label {
     font-weight: 600;
-    color: #334155;
+    color: var(--wp-text);
     font-size: 14px;
   }
 
   input, textarea {
-    border: 2px solid #e5e7eb;
-    border-radius: 12px;
+    border: 2px solid var(--wp-border);
+    border-radius: var(--wp-radius-lg);
     padding: 12px 14px;
     font-size: 14px;
     font-family: inherit;
@@ -431,13 +445,13 @@ const Actions = styled.div`
 `;
 
 const Btn = styled.button`
-  border-radius: 10px;
+  border-radius: var(--wp-radius-lg);
   padding: 10px 14px;
   font-size: 13px;
   font-weight: 600;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--wp-border);
   background: ${(p) => (p.primary ? '#1a73e8' : '#fff')};
-  color: ${(p) => (p.primary ? '#fff' : '#334155')};
+  color: ${(p) => (p.primary ? '#fff' : 'var(--wp-text)')};
   cursor: pointer;
 `;
 
@@ -675,13 +689,19 @@ export default function CalendarPage() {
           <MainTitle>{titleText}</MainTitle>
         </TopLeft>
         <TopRight>
-          <IconButton type="button"><Search size={16} /></IconButton>
-          <IconButton type="button"><Settings size={16} /></IconButton>
-          <ViewSelect value={viewType} onChange={(e) => handleViewChange(e.target.value)}>
+          <ViewSelect value={viewType} onChange={(e) => handleViewChange(e.target.value)} aria-label="Calendar view">
             <option value="dayGridMonth">Month</option>
             <option value="timeGridWeek">Week</option>
             <option value="timeGridDay">Day</option>
           </ViewSelect>
+          <AddButton type="button" onClick={() => {
+              const now = new Date();
+              const later = new Date(now.getTime() + 60 * 60 * 1000);
+              openForRange(now.toISOString().slice(0, 16), later.toISOString().slice(0, 16), false);
+            }}>
+            <Plus size={14} />
+            New event
+          </AddButton>
         </TopRight>
       </TopBar>
 
@@ -746,15 +766,12 @@ export default function CalendarPage() {
             })}
           </MiniGrid>
 
-          <SearchPeople type="button">
-            <Search size={14} />
-            Search for people
-          </SearchPeople>
-
           <UpcomingList>
             <PanelTitle>Upcoming</PanelTitle>
-            {upcomingMeetings.length === 0 ? (
-              <div style={{ fontSize: 12, color: '#6b7280' }}>No upcoming meetings</div>
+            {isLoadingMeetings ? (
+              <ItemListSkeleton label="Loading upcoming meetings" />
+            ) : upcomingMeetings.length === 0 ? (
+              <div style={{ fontSize: 12, color: 'var(--wp-text-muted)' }}>No upcoming meetings</div>
             ) : (
               upcomingMeetings.map((m) => (
                 <UpcomingItem
@@ -772,7 +789,7 @@ export default function CalendarPage() {
 
         <CalendarShell>
           {isLoadingMeetings ? (
-            <SectionLoader message="Loading calendar events" minHeight="440px" />
+            <CalendarGridSkeleton />
           ) : (
             <FullCalendar
               ref={calendarRef}
@@ -798,9 +815,6 @@ export default function CalendarPage() {
                 hour12: true,
               }}
               eventDisplay="block"
-              eventBackgroundColor="#1a73e8"
-              eventBorderColor="#1557b0"
-              eventTextColor="#ffffff"
               select={(selection) =>
                 openForRange(selection.startStr.slice(0, 16), selection.endStr.slice(0, 16), selection.allDay)
               }

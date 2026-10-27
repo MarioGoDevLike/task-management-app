@@ -41,9 +41,40 @@ function mapDocToTask(id, data, userById) {
     dueDate: data.dueDate,
     projectId: data.projectId || '',
     isArchived: !!data.isArchived,
+    commentCount: data.commentCount || 0,
     user: hydrateUser(ownerId),
     assignees: assignees.length ? assignees : ownerId ? [hydrateUser(ownerId)] : [],
   };
+}
+
+/**
+ * User profiles referenced by tasks, cached for the signed-in session so a task
+ * snapshot only reads profiles it has not seen yet (previously every snapshot
+ * re-read every user document). Failed reads are evicted so they retry.
+ * @type {Map<string, Promise<object>>}
+ */
+const userProfileCache = new Map();
+
+function loadUserProfile(db, uid) {
+  if (!userProfileCache.has(uid)) {
+    const pending = getDoc(doc(db, 'users', uid)).then((snap) => {
+      if (!snap.exists()) {
+        return { _id: uid, id: uid, email: '', firstName: '', lastName: '' };
+      }
+      const d = snap.data();
+      return {
+        _id: uid,
+        id: uid,
+        email: d.email || '',
+        firstName: d.firstName || '',
+        lastName: d.lastName || '',
+        fullName: `${d.firstName || ''} ${d.lastName || ''}`.trim() || d.email || '',
+      };
+    });
+    pending.catch(() => userProfileCache.delete(uid));
+    userProfileCache.set(uid, pending);
+  }
+  return userProfileCache.get(uid);
 }
 
 async function buildUserLookup(docs) {
@@ -57,20 +88,7 @@ async function buildUserLookup(docs) {
   const userById = {};
   await Promise.all(
     [...ids].map(async (uid) => {
-      const snap = await getDoc(doc(db, 'users', uid));
-      if (!snap.exists()) {
-        userById[uid] = { _id: uid, id: uid, email: '', firstName: '', lastName: '' };
-        return;
-      }
-      const d = snap.data();
-      userById[uid] = {
-        _id: uid,
-        id: uid,
-        email: d.email || '',
-        firstName: d.firstName || '',
-        lastName: d.lastName || '',
-        fullName: `${d.firstName || ''} ${d.lastName || ''}`.trim() || d.email || '',
-      };
+      userById[uid] = await loadUserProfile(db, uid);
     })
   );
   return userById;
@@ -97,6 +115,7 @@ export const TasksProvider = ({ children }) => {
   }, []);
 
   useEffect(() => {
+    userProfileCache.clear();
     if (!isAuthenticated || !uid) {
       setTasks([]);
       setIsLoading(false);

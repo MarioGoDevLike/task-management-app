@@ -1,12 +1,12 @@
 import React from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { FullPageLoader } from './AppLoader';
+import { AppBootSkeleton } from './AppLoader';
 
 const ProtectedRoute = ({ children }) => {
   const { isAuthenticated, isLoading } = useAuth();
 
   if (isLoading) {
-    return <FullPageLoader message="Authenticating session" />;
+    return <AppBootSkeleton />;
   }
 
   if (!isAuthenticated) {

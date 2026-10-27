@@ -8,6 +8,10 @@ import {
   deleteDoc,
   query,
   where,
+  orderBy,
+  onSnapshot,
+  addDoc,
+  increment,
   serverTimestamp,
   getCountFromServer,
 } from 'firebase/firestore';
@@ -129,6 +133,7 @@ function userDocToAppUser(data, uid, teamsById) {
     teams: teamsPopulated,
     permissions,
     lastLogin: tsToIso(data.lastLogin),
+    mustChangePassword: !!data.mustChangePassword,
   };
 }
 
@@ -273,6 +278,7 @@ async function hydrateTaskDoc(taskId, data) {
     dueDate: tsToIso(data.dueDate),
     projectId: data.projectId || '',
     isArchived: !!data.isArchived,
+    commentCount: data.commentCount || 0,
     user: userMini,
     assignees,
     history: (data.history || []).map((h) => ({
@@ -393,6 +399,31 @@ export const firebaseAuthApi = {
 
   async me() {
     const u = await requireAuth();
+    const user = await loadAppUserForAuth(u);
+    return { data: { user } };
+  },
+
+  async changePassword({ newPassword }) {
+    const u = await requireAuth();
+    if (!newPassword || newPassword.length < 6) {
+      throw apiError('Password must be at least 6 characters', 400);
+    }
+    const db = getDb();
+    const ref = doc(db, 'users', u.uid);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) throw apiError('User not found', 404);
+    if (!snap.data()?.mustChangePassword) {
+      throw apiError('Password change is not required for this account', 400);
+    }
+    try {
+      await updatePassword(u, newPassword);
+    } catch (e) {
+      throw apiError(mapAuthMessage(e.code, e.message), 400);
+    }
+    await updateDoc(ref, {
+      mustChangePassword: false,
+      passwordChangedAt: serverTimestamp(),
+    });
     const user = await loadAppUserForAuth(u);
     return { data: { user } };
   },
@@ -690,6 +721,107 @@ export const firebaseProjectsApi = {
     },
 };
 
+const COMMENT_MAX_LENGTH = 5000;
+const COMMENT_MAX_IMAGES = 3;
+// Firestore documents cap at 1 MiB; keep a margin for the other fields.
+const COMMENT_MAX_PAYLOAD = 900_000;
+
+function displayNameOf(profile) {
+  const name = `${profile?.firstName || ''} ${profile?.lastName || ''}`.trim();
+  return name || profile?.email || 'Unknown';
+}
+
+/** Who may read and write a task's comments: its owner, its assignees and admins. */
+async function requireTaskAccess(taskId) {
+  const u = await requireAuth();
+  const db = getDb();
+  const tsnap = await getDoc(doc(db, 'tasks', taskId));
+  if (!tsnap.exists()) throw apiError('Task not found', 404);
+  const task = tsnap.data();
+  const isParticipant = task.userId === u.uid || (task.assigneeIds || []).includes(u.uid);
+  const usnap = await getDoc(doc(db, 'users', u.uid));
+  const profile = usnap.data() || {};
+  const isAdmin = (profile.roles || []).includes('admin');
+  if (!isParticipant && !isAdmin) throw apiError('Forbidden', 403);
+  return { u, task, profile, isAdmin };
+}
+
+function commentDocToComment(id, data) {
+  return {
+    id,
+    authorId: data.authorId,
+    authorName: data.authorName || 'Unknown',
+    body: data.body || '',
+    mentionIds: data.mentionIds || [],
+    images: data.images || [],
+    // Pending server timestamps are null locally; show them as "just now".
+    createdAt: tsToIso(data.createdAt) || new Date().toISOString(),
+  };
+}
+
+export const firebaseCommentsApi = {
+  /** Live comment thread, oldest first. Returns an unsubscribe function. */
+  subscribe(taskId, onChange, onError) {
+    const db = getDb();
+    const q = query(collection(db, 'tasks', taskId, 'comments'), orderBy('createdAt', 'asc'));
+    return onSnapshot(
+      q,
+      (snap) => onChange(snap.docs.map((d) => commentDocToComment(d.id, d.data({ serverTimestamps: 'estimate' })))),
+      onError
+    );
+  },
+
+  /** People who can see the task, i.e. who a mention can actually reach. */
+  async listMentionCandidates(taskId) {
+    const { task } = await requireTaskAccess(taskId);
+    const ids = [...new Set([task.userId, ...(task.assigneeIds || [])].filter(Boolean))];
+    const cache = {};
+    const users = await Promise.all(ids.map((id) => getUserMini(id, cache)));
+    return { data: { users: users.map((x) => ({ ...x, name: displayNameOf(x) })) } };
+  },
+
+  async addComment(taskId, body) {
+    const { u, task, profile } = await requireTaskAccess(taskId);
+    const text = String(body?.body || '').trim();
+    const images = (Array.isArray(body?.images) ? body.images : [])
+      .filter((x) => typeof x === 'string' && x.startsWith('data:image/'))
+      .slice(0, COMMENT_MAX_IMAGES);
+    if (!text && images.length === 0) throw apiError('Write a comment or attach an image', 400);
+    if (text.length > COMMENT_MAX_LENGTH) {
+      throw apiError(`Comments are limited to ${COMMENT_MAX_LENGTH} characters`, 400);
+    }
+    if (text.length + images.reduce((n, x) => n + x.length, 0) > COMMENT_MAX_PAYLOAD) {
+      throw apiError('Attached images are too large. Remove one or use smaller photos.', 400);
+    }
+    const allowed = new Set([task.userId, ...(task.assigneeIds || [])]);
+    const mentionIds = [...new Set(body?.mentionIds || [])].filter((id) => allowed.has(id) && id !== u.uid);
+
+    const db = getDb();
+    const ref = await addDoc(collection(db, 'tasks', taskId, 'comments'), {
+      authorId: u.uid,
+      authorName: displayNameOf(profile),
+      body: text,
+      mentionIds,
+      images,
+      createdAt: serverTimestamp(),
+    });
+    await updateDoc(doc(db, 'tasks', taskId), { commentCount: increment(1) });
+    return { data: { id: ref.id } };
+  },
+
+  async deleteComment(taskId, commentId) {
+    const { u, isAdmin } = await requireTaskAccess(taskId);
+    const db = getDb();
+    const cref = doc(db, 'tasks', taskId, 'comments', commentId);
+    const csnap = await getDoc(cref);
+    if (!csnap.exists()) throw apiError('Comment not found', 404);
+    if (csnap.data().authorId !== u.uid && !isAdmin) throw apiError('You can only delete your own comments', 403);
+    await deleteDoc(cref);
+    await updateDoc(doc(db, 'tasks', taskId), { commentCount: increment(-1) });
+    return { data: { message: 'Comment deleted' } };
+  },
+};
+
 export const firebaseTeamsApi = {
   async listTeams() {
       await requireAuth();
@@ -793,6 +925,7 @@ export const firebaseAdminApi = {
         lastName: body.lastName || '',
         roles: body.roles?.length ? body.roles : ['member'],
         teamIds: (body.teams || []).map((t) => (typeof t === 'string' ? t : t._id || t.id)),
+        mustChangePassword: true,
         createdAt: serverTimestamp(),
       });
       const usnap = await getDoc(doc(db, 'users', uid));

@@ -5,6 +5,7 @@ import {
   firebaseTeamsApi,
   firebaseKanbanApi,
   firebaseProjectsApi,
+  firebaseCommentsApi,
   DEFAULT_KANBAN_COLUMNS,
   normalizeKanbanColumns,
 } from './firebaseBackend';
@@ -16,6 +17,7 @@ export const authAPI = {
   login: (credentials) => firebaseAuthApi.login(credentials),
   logout: () => firebaseAuthApi.logout(),
   getCurrentUser: () => firebaseAuthApi.me(),
+  changePassword: (body) => firebaseAuthApi.changePassword(body),
 };
 
 export const tasksAPI = {
@@ -61,6 +63,13 @@ export const projectsAPI = {
   createProject: (body) => firebaseProjectsApi.createProject(body),
   updateProject: (id, body) => firebaseProjectsApi.updateProject(id, body),
   deleteProject: (id) => firebaseProjectsApi.deleteProject(id),
+};
+
+export const commentsAPI = {
+  subscribe: (taskId, onChange, onError) => firebaseCommentsApi.subscribe(taskId, onChange, onError),
+  listMentionCandidates: (taskId) => firebaseCommentsApi.listMentionCandidates(taskId),
+  addComment: (taskId, body) => firebaseCommentsApi.addComment(taskId, body),
+  deleteComment: (taskId, commentId) => firebaseCommentsApi.deleteComment(taskId, commentId),
 };
 
 export async function healthCheck() {

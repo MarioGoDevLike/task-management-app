@@ -1,300 +1,359 @@
-import React, { useState } from 'react';
-import { NavLink, Outlet } from 'react-router-dom';
+import React, { useState, useRef, useEffect, useCallback, Suspense } from 'react';
+import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import styled from 'styled-components';
 import { useAuth } from '../contexts/AuthContext';
+import { useTheme } from '../contexts/ThemeContext';
+import { CommandPalette, useCommandPalette } from './CommandPalette';
+import { PageSkeleton } from './AppLoader';
+import { hasPermission } from '../utils/permissions';
 import {
   LayoutDashboard,
   ListTodo,
+  Inbox,
+  FolderKanban,
   CalendarDays,
   Settings as SettingsIcon,
-  ChevronLeft,
-  ChevronRight,
+  PanelLeftClose,
+  PanelLeftOpen,
   LogOut,
+  Menu,
+  Search,
+  Plus,
+  Sun,
+  Moon,
+  ChevronsUpDown,
 } from 'lucide-react';
+
+const SIDEBAR_KEY = 'workpilot-sidebar-collapsed';
 
 const LayoutWrapper = styled.div`
   height: 100dvh;
-  background: #f8fafc;
+  background: var(--wp-bg);
   display: flex;
-  color: #0f172a;
+  color: var(--wp-text);
   overflow: hidden;
 `;
 
 const Sidebar = styled.aside`
-  width: ${({ $collapsed }) => ($collapsed ? '92px' : '300px')};
+  width: ${({ $collapsed }) => ($collapsed ? '60px' : '232px')};
   height: 100dvh;
-  border-right: 1px solid #e2e8f0;
-  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
-  padding: ${({ $collapsed }) => ($collapsed ? '24px 0' : '24px 16px')};
+  background: var(--wp-sidebar-bg);
+  border-right: 1px solid var(--wp-sidebar-border);
+  color: var(--wp-sidebar-text);
+  padding: 12px ${({ $collapsed }) => ($collapsed ? '8px' : '10px')};
   display: flex;
   flex-direction: column;
-  gap: 22px;
+  gap: 12px;
   overflow-y: auto;
   overflow-x: hidden;
-  position: relative;
+  flex-shrink: 0;
   z-index: 220;
-  transition: width 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: width 0.16s ease;
 
   @media (max-width: 1024px) {
     position: fixed;
     top: 0;
     left: 0;
     bottom: 0;
-    z-index: 210;
-    transform: translateX(${(props) => (props.open ? '0' : '-100%')});
-    transition: transform 0.22s ease;
-    box-shadow: ${(props) =>
-      props.open ? '0 24px 60px rgba(15, 23, 42, 0.22)' : 'none'};
+    width: 248px;
+    padding: 12px 10px;
+    transform: translateX(${(p) => (p.$open ? '0' : '-100%')});
+    transition: transform 0.18s ease;
+    box-shadow: ${(p) => (p.$open ? 'var(--wp-shadow-xl)' : 'none')};
   }
-`;
-
-const SidebarTop = styled.div`
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-
-  ${({ $collapsed }) =>
-    $collapsed &&
-    `
-    flex-direction: column;
-    align-items: center;
-    justify-content: flex-start;
-    gap: 12px;
-  `}
 `;
 
 const Brand = styled.div`
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+  height: 36px;
+  padding: 0 ${({ $collapsed }) => ($collapsed ? '4px' : '6px')};
   min-width: 0;
-  width: 100%;
-  justify-content: flex-start;
-  transition: justify-content 0.26s cubic-bezier(0.4, 0, 0.2, 1), gap 0.26s cubic-bezier(0.4, 0, 0.2, 1);
 
-  ${({ $collapsed }) =>
-    $collapsed &&
-    `
-    justify-content: center;
-    gap: 0;
-  `}
-
-  span {
-    font-size: 18px;
+  .name {
+    font-size: 14px;
     font-weight: 700;
-    color: #0f172a;
-    letter-spacing: -0.3px;
+    color: var(--wp-sidebar-text-strong);
     white-space: nowrap;
-    transition: opacity 0.22s ease, transform 0.22s ease;
-    ${({ $collapsed }) =>
-      $collapsed
-        ? `
-      opacity: 0;
-      transform: translateX(-4px);
-      pointer-events: none;
-    `
-        : `
-      opacity: 1;
-      transform: translateX(0);
-    `}
+    line-height: 1.1;
+  }
+
+  .sub {
+    font-size: 11px;
+    color: var(--wp-sidebar-text);
+    white-space: nowrap;
   }
 `;
 
-const BrandLogo = styled.div`
-  width: 36px;
-  height: 36px;
-  border-radius: 12px;
-  background: linear-gradient(135deg, #3b82f6, #6366f1);
-  color: white;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+const BrandMark = styled.div`
+  width: 28px;
+  height: 28px;
+  border-radius: var(--wp-radius);
+  background: var(--wp-primary);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-family: var(--wp-font-mono);
   font-weight: 700;
-  font-size: 16px;
+  font-size: 12px;
+  flex-shrink: 0;
 `;
 
-const Navigation = styled.nav`
+const SidebarSearch = styled.button`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  width: 100%;
+  padding: ${({ $collapsed }) => ($collapsed ? '0' : '0 10px')};
+  justify-content: ${({ $collapsed }) => ($collapsed ? 'center' : 'flex-start')};
+  border-radius: var(--wp-radius);
+  border: 1px solid var(--wp-sidebar-border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--wp-sidebar-text);
+  font-size: 13px;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--wp-sidebar-hover);
+    color: var(--wp-sidebar-text-strong);
+  }
+
+  .label {
+    flex: 1;
+    text-align: left;
+  }
+`;
+
+const Kbd = styled.kbd`
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-family: var(--wp-font-mono);
+  font-size: 10px;
+  line-height: 1;
+  border: 1px solid ${(p) => (p.$dark ? 'var(--wp-sidebar-border)' : 'var(--wp-border)')};
+  background: ${(p) => (p.$dark ? 'rgba(255,255,255,0.04)' : 'var(--wp-surface-2)')};
+  color: ${(p) => (p.$dark ? 'var(--wp-sidebar-text)' : 'var(--wp-text-subtle)')};
+`;
+
+const NavSection = styled.nav`
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 1px;
+`;
+
+const NavHeading = styled.div`
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--wp-text-subtle);
+  padding: 6px 10px 4px;
+  ${({ $collapsed }) => ($collapsed ? 'visibility: hidden; height: 8px; padding: 0;' : '')}
 `;
 
 const StyledNavLink = styled(NavLink)`
-  width: ${({ $collapsed }) => ($collapsed ? '72px' : '100%')};
-  margin: ${({ $collapsed }) => ($collapsed ? '0 auto' : '0')};
-  padding: ${({ $collapsed }) => ($collapsed ? '10px 8px' : '12px 14px')};
-  border-radius: 12px;
-  font-weight: 600;
-  font-size: ${({ $collapsed }) => ($collapsed ? '12px' : '14px')};
-  color: #475569;
-  text-decoration: none;
-  transition:
-    background 0.18s ease,
-    color 0.18s ease,
-    border-color 0.18s ease,
-    padding 0.26s cubic-bezier(0.4, 0, 0.2, 1),
-    gap 0.26s cubic-bezier(0.4, 0, 0.2, 1),
-    font-size 0.26s cubic-bezier(0.4, 0, 0.2, 1);
-  border: 1px solid transparent;
-  display: flex;
-  flex-direction: ${({ $collapsed }) => ($collapsed ? 'column' : 'row')};
-  align-items: center;
-  justify-content: ${({ $collapsed }) => ($collapsed ? 'center' : 'flex-start')};
-  gap: ${({ $collapsed }) => ($collapsed ? '6px' : '10px')};
   position: relative;
-
-  &.active {
-    color: #2563eb;
-    border-color: #bfdbfe;
-    background: linear-gradient(135deg, #eff6ff 0%, #e5f0ff 100%);
-    box-shadow: 0 6px 16px rgba(37, 99, 235, 0.14);
-  }
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 32px;
+  padding: 0 10px;
+  justify-content: ${({ $collapsed }) => ($collapsed ? 'center' : 'flex-start')};
+  border-radius: var(--wp-radius);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--wp-sidebar-text);
+  text-decoration: none;
 
   &:hover {
-    color: #2563eb;
-    background: rgba(37, 99, 235, 0.08);
+    background: var(--wp-sidebar-hover);
+    color: var(--wp-sidebar-text-strong);
+  }
+
+  &.active {
+    background: var(--wp-sidebar-active);
+    color: var(--wp-sidebar-text-strong);
+
+    &::before {
+      content: '';
+      position: absolute;
+      left: -10px;
+      top: 7px;
+      bottom: 7px;
+      width: 3px;
+      border-radius: 0 3px 3px 0;
+      background: var(--wp-sidebar-accent);
+    }
+
+    svg {
+      color: var(--wp-sidebar-accent);
+    }
   }
 
   .nav-label {
-    ${({ $collapsed }) =>
-      $collapsed
-        ? `
-      white-space: normal;
-      text-align: center;
-      font-size: 11px;
-      line-height: 1.3;
-      max-width: 72px;
-    `
-        : `
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      text-align: left;
-    `}
+    flex: 1;
+    ${({ $collapsed }) => ($collapsed ? 'display: none;' : '')}
+  }
+
+  .nav-key {
+    ${({ $collapsed }) => ($collapsed ? 'display: none;' : '')}
+    opacity: 0;
+  }
+
+  &:hover .nav-key {
+    opacity: 1;
   }
 `;
 
 const SidebarFooter = styled.div`
   margin-top: auto;
-  border-top: 1px solid #e2e8f0;
-  padding-top: 16px;
+  padding-top: 10px;
+  border-top: 1px solid var(--wp-sidebar-border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 `;
-const CollapseIconButton = styled.button`
-  width: 32px;
-  height: 32px;
-  border-radius: 999px;
-  border: 1px solid #e2e8f0;
-  background: #ffffff;
+
+const SidebarButton = styled.button`
   display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 10px;
+  height: 32px;
+  width: 100%;
+  padding: 0 10px;
+  justify-content: ${({ $collapsed }) => ($collapsed ? 'center' : 'flex-start')};
+  border: none;
+  border-radius: var(--wp-radius);
+  background: transparent;
+  color: var(--wp-sidebar-text);
+  font-size: 13px;
   cursor: pointer;
-  color: #64748b;
-  flex-shrink: 0;
 
   &:hover {
-    border-color: #cbd5e1;
-    background: #f8fafc;
-    color: #1e40af;
+    background: var(--wp-sidebar-hover);
+    color: var(--wp-sidebar-text-strong);
   }
-`;
-
-const MobileHeader = styled.header`
-  display: none;
-  height: 68px;
-  padding: 0 18px;
-  align-items: center;
-  justify-content: space-between;
-  border-bottom: 1px solid #e2e8f0;
-  background: #fff;
-  position: sticky;
-  top: 0;
-  z-index: 150;
 
   @media (max-width: 1024px) {
-    display: flex;
+    &.desktop-only {
+      display: none;
+    }
   }
 `;
 
-const MobileMenuButton = styled.button`
-  border: none;
-  background: none;
-  font-size: 22px;
-  cursor: pointer;
-  color: #475569;
+const UserMenuWrap = styled.div`
+  position: relative;
 `;
 
-const UserControls = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-`;
-
-const UserMeta = styled.div`
+const UserButton = styled.button`
   width: 100%;
-  text-align: left;
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  padding: 12px;
+  align-items: center;
+  gap: 10px;
+  padding: 6px ${({ $collapsed }) => ($collapsed ? '0' : '8px')};
+  justify-content: ${({ $collapsed }) => ($collapsed ? 'center' : 'flex-start')};
+  border: none;
+  border-radius: var(--wp-radius);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  color: var(--wp-sidebar-text-strong);
 
-  span:first-child {
-    font-weight: 600;
-    font-size: 14px;
-    color: #0f172a;
+  &:hover {
+    background: var(--wp-sidebar-hover);
   }
 
-  span:last-child {
+  .info {
+    flex: 1;
+    min-width: 0;
+    ${({ $collapsed }) => ($collapsed ? 'display: none;' : '')}
+  }
+
+  .name {
+    font-size: 13px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .role {
+    font-size: 11px;
+    color: var(--wp-sidebar-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .chev {
+    color: var(--wp-sidebar-text);
+    ${({ $collapsed }) => ($collapsed ? 'display: none;' : '')}
+  }
+`;
+
+const Avatar = styled.div`
+  width: 28px;
+  height: 28px;
+  border-radius: var(--wp-radius);
+  background: #2b3340;
+  color: #e8ebef;
+  font-size: 11px;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+`;
+
+const Dropdown = styled.div`
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  min-width: 212px;
+  background: var(--wp-surface-elevated);
+  border: 1px solid var(--wp-border);
+  border-radius: var(--wp-radius-lg);
+  box-shadow: var(--wp-shadow-lg);
+  padding: 4px;
+  z-index: 300;
+
+  .head {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--wp-border-subtle);
+    margin-bottom: 4px;
     font-size: 12px;
-    color: #64748b;
+    color: var(--wp-text-subtle);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 `;
 
-const LogoutButton = styled.button`
-  width: ${({ $collapsed }) => ($collapsed ? '72px' : '100%')};
-  margin: ${({ $collapsed }) => ($collapsed ? '0 auto' : '0')};
-  padding: 11px 16px;
-  border-radius: 12px;
-  border: none;
-  background: linear-gradient(135deg, #ef4444, #dc2626);
-  color: white;
-  font-weight: 600;
-  font-size: 13px;
-  cursor: pointer;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-  display: inline-flex;
+const DropdownItem = styled.button`
+  width: 100%;
+  display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 6px;
+  gap: 10px;
+  height: 32px;
+  padding: 0 10px;
+  border: none;
+  border-radius: var(--wp-radius-sm);
+  background: transparent;
+  font-size: 13px;
+  color: var(--wp-text);
+  cursor: pointer;
+  text-align: left;
 
   &:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 10px 20px rgba(239, 68, 68, 0.25);
+    background: var(--wp-hover);
   }
 
-  .label {
-    ${({ $collapsed }) => $collapsed && 'display: none;'}
-  }
-`;
-
-const SidebarOverlay = styled.button`
-  display: none;
-  position: fixed;
-  inset: 0;
-  border: none;
-  background: rgba(15, 23, 42, 0.35);
-  z-index: 200;
-  padding: 0;
-
-  @media (max-width: 1024px) {
-    display: ${(props) => (props.show ? 'block' : 'none')};
+  &.danger {
+    color: var(--wp-error);
   }
 `;
 
@@ -304,110 +363,464 @@ const ContentArea = styled.main`
   display: flex;
   flex-direction: column;
   min-width: 0;
-  overflow-y: auto;
+  overflow: hidden;
+`;
 
-  @media (max-width: 1024px) {
-    height: 100dvh;
+const TopBar = styled.header`
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 52px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--wp-border);
+  background: var(--wp-header-bg);
+  flex-shrink: 0;
+  z-index: 100;
+
+  @media (max-width: 768px) {
+    padding: 0 12px;
+    gap: 8px;
   }
 `;
 
+const TopTitle = styled.div`
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+
+  h1 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--wp-text);
+    white-space: nowrap;
+  }
+
+  span {
+    font-size: 12px;
+    color: var(--wp-text-subtle);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+
+    @media (max-width: 640px) {
+      display: none;
+    }
+  }
+`;
+
+const HeaderButton = styled.button`
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: var(--wp-radius);
+  border: 1px solid var(--wp-border);
+  background: var(--wp-surface);
+  color: var(--wp-text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  flex-shrink: 0;
+
+  &:hover {
+    background: var(--wp-surface-2);
+    color: var(--wp-text);
+    border-color: var(--wp-border-strong);
+  }
+
+  &.icon {
+    width: 32px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  &.search {
+    min-width: 220px;
+
+    .label {
+      flex: 1;
+      text-align: left;
+      color: var(--wp-text-subtle);
+    }
+
+    @media (max-width: 900px) {
+      min-width: 0;
+      width: 32px;
+      padding: 0;
+      justify-content: center;
+
+      .label,
+      kbd {
+        display: none;
+      }
+    }
+  }
+
+  &.mobile-only {
+    @media (min-width: 1025px) {
+      display: none;
+    }
+  }
+`;
+
+const PrimaryButton = styled.button`
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: var(--wp-radius);
+  border: 1px solid var(--wp-primary);
+  background: var(--wp-primary);
+  color: var(--wp-on-primary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+
+  &:hover {
+    background: var(--wp-primary-hover);
+    border-color: var(--wp-primary-hover);
+  }
+
+  kbd {
+    border-color: rgba(255, 255, 255, 0.3);
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+  }
+
+  @media (max-width: 640px) {
+    .label,
+    kbd {
+      display: none;
+    }
+  }
+`;
+
+const PageScroll = styled.div`
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--wp-bg);
+
+  &:focus {
+    outline: none;
+  }
+`;
+
+const SidebarOverlay = styled.button`
+  display: none;
+  position: fixed;
+  inset: 0;
+  border: none;
+  background: var(--wp-overlay);
+  z-index: 200;
+  padding: 0;
+  cursor: default;
+
+  @media (max-width: 1024px) {
+    display: ${(p) => (p.$show ? 'block' : 'none')};
+  }
+`;
+
+const SkipLink = styled.a`
+  position: absolute;
+  left: -9999px;
+  top: 8px;
+  z-index: 9999;
+  padding: 8px 16px;
+  background: var(--wp-primary);
+  color: var(--wp-on-primary);
+  border-radius: var(--wp-radius);
+  font-weight: 600;
+  text-decoration: none;
+
+  &:focus {
+    left: 8px;
+  }
+`;
+
+const PAGES = {
+  '/': { title: 'My work', sub: 'Your open tasks across all projects' },
+  '/tasks': { title: 'Tasks', sub: 'Plan, track and deliver project work' },
+  '/projects': { title: 'Projects', sub: 'Portfolio, progress and ownership' },
+  '/calendar': { title: 'Calendar', sub: 'Deadlines and meetings' },
+  '/admin': { title: 'Dashboard', sub: 'Team, roles and workload' },
+  '/settings': { title: 'Settings', sub: 'Workspace configuration' },
+};
+
+const GOTO_KEYS = { m: '/', t: '/tasks', p: '/projects', c: '/calendar', d: '/admin', s: '/settings' };
+
+function getInitials(user) {
+  const name = user?.fullName || user?.email || '?';
+  const parts = name.trim().split(/\s+/);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return name.slice(0, 2).toUpperCase();
+}
+
+function isTypingTarget(el) {
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
+}
+
+function readCollapsed() {
+  try {
+    return localStorage.getItem(SIDEBAR_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
 const DashboardLayout = () => {
   const { user, logout } = useAuth();
+  const { isDark, toggleTheme } = useTheme();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(readCollapsed);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef(null);
+  const palette = useCommandPalette();
+  const closePalette = palette.close;
 
   const closeSidebar = () => setIsSidebarOpen(false);
-
   const isAdmin = user?.roles?.includes('admin');
   const canOpenSettings = isAdmin || user?.permissions?.includes('kanban.manage');
+  const canCreateTask = hasPermission(user, 'tasks.create');
+  const page = PAGES[location.pathname] || { title: 'WorkPilot', sub: '' };
+  const roleLabel = isAdmin ? 'Administrator' : user?.roles?.[0] || 'Member';
+
+  const toggleCollapsed = () => {
+    setIsCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(SIDEBAR_KEY, next ? '1' : '0');
+      } catch {
+        /* storage unavailable: keep in-memory state */
+      }
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    const onClickOutside = (e) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target)) {
+        setUserMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, []);
+
+  const handleCreateTask = useCallback(() => {
+    closePalette();
+    navigate('/tasks', { state: { openCreateTask: true } });
+  }, [navigate, closePalette]);
+
+  // Global single-key shortcuts: N = new task, G then T/C/D/S = go to page.
+  const allowedRef = useRef({});
+  allowedRef.current = {
+    '/': true,
+    '/tasks': true,
+    '/projects': true,
+    '/calendar': true,
+    '/admin': isAdmin,
+    '/settings': canOpenSettings,
+  };
+  useEffect(() => {
+    let gotoArmedUntil = 0;
+    const onKeyDown = (e) => {
+      if (e.metaKey || e.ctrlKey || e.altKey || isTypingTarget(e.target)) return;
+      if (document.querySelector('[role="dialog"]')) return;
+      const key = e.key.toLowerCase();
+      if (Date.now() < gotoArmedUntil && GOTO_KEYS[key]) {
+        gotoArmedUntil = 0;
+        const path = GOTO_KEYS[key];
+        if (allowedRef.current[path]) {
+          e.preventDefault();
+          navigate(path);
+        }
+        return;
+      }
+      if (key === 'g') {
+        gotoArmedUntil = Date.now() + 1200;
+        return;
+      }
+      if (key === 'n' && canCreateTask) {
+        e.preventDefault();
+        handleCreateTask();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [navigate, handleCreateTask, canCreateTask]);
+
+  const navItem = (to, Icon, label, key, end) => (
+    <StyledNavLink
+      to={to}
+      end={end}
+      $collapsed={isCollapsed}
+      onClick={closeSidebar}
+      title={isCollapsed ? label : undefined}
+    >
+      <Icon size={16} aria-hidden />
+      <span className="nav-label">{label}</span>
+      <Kbd $dark className="nav-key">G {key}</Kbd>
+    </StyledNavLink>
+  );
 
   return (
     <LayoutWrapper>
-      <SidebarOverlay show={isSidebarOpen} onClick={closeSidebar} aria-label="Close navigation" />
-      <Sidebar open={isSidebarOpen} $collapsed={isCollapsed}>
-        <SidebarTop $collapsed={isCollapsed}>
+      <SkipLink href="#main-content">Skip to main content</SkipLink>
+      <SidebarOverlay $show={isSidebarOpen} onClick={closeSidebar} aria-label="Close navigation" />
+      <Sidebar $open={isSidebarOpen} $collapsed={isCollapsed}>
+        <Brand $collapsed={isCollapsed}>
+          <BrandMark>WP</BrandMark>
           {!isCollapsed && (
-            <Brand $collapsed={isCollapsed}>
-              <BrandLogo>WP</BrandLogo>
-              <span>WorkPilot</span>
-            </Brand>
+            <div>
+              <div className="name">WorkPilot</div>
+              <div className="sub">Engineering workspace</div>
+            </div>
           )}
-          <CollapseIconButton
-            type="button"
-            onClick={() => setIsCollapsed((prev) => !prev)}
-            aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          >
-            {isCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
-          </CollapseIconButton>
-        </SidebarTop>
+        </Brand>
 
-        <Navigation>
-          <StyledNavLink
-            to="/"
-            end
-            $collapsed={isCollapsed}
-          >
-            <ListTodo size={18} />
-            <span className="nav-label">Tasks</span>
-          </StyledNavLink>
-          <StyledNavLink
-            to="/calendar"
-            $collapsed={isCollapsed}
-          >
-            <CalendarDays size={18} />
-            <span className="nav-label">Calendar</span>
-          </StyledNavLink>
-          {isAdmin && (
-              <StyledNavLink
-                to="/admin"
-                $collapsed={isCollapsed}
-              >
-                <LayoutDashboard size={18} />
-                <span className="nav-label">Dashboard</span>
-              </StyledNavLink>
+        <SidebarSearch
+          type="button"
+          $collapsed={isCollapsed}
+          onClick={() => palette.setOpen(true)}
+          aria-label="Search and commands (Ctrl+K)"
+          title="Search and commands (Ctrl+K)"
+        >
+          <Search size={14} />
+          {!isCollapsed && (
+            <>
+              <span className="label">Jump to…</span>
+              <Kbd $dark>Ctrl K</Kbd>
+            </>
           )}
-          {canOpenSettings && (
-              <StyledNavLink
-                to="/settings"
-                $collapsed={isCollapsed}
-              >
-                <SettingsIcon size={18} />
-                <span className="nav-label">Settings</span>
-              </StyledNavLink>
-          )}
-        </Navigation>
+        </SidebarSearch>
+
+        <NavSection aria-label="Workspace">
+          <NavHeading $collapsed={isCollapsed}>Workspace</NavHeading>
+          {navItem('/', Inbox, 'My work', 'M', true)}
+          {navItem('/tasks', ListTodo, 'Tasks', 'T')}
+          {navItem('/projects', FolderKanban, 'Projects', 'P')}
+          {navItem('/calendar', CalendarDays, 'Calendar', 'C')}
+        </NavSection>
+
+        {(isAdmin || canOpenSettings) && (
+          <NavSection aria-label="Administration">
+            <NavHeading $collapsed={isCollapsed}>Administration</NavHeading>
+            {isAdmin && navItem('/admin', LayoutDashboard, 'Dashboard', 'D')}
+            {canOpenSettings && navItem('/settings', SettingsIcon, 'Settings', 'S')}
+          </NavSection>
+        )}
 
         <SidebarFooter>
-          <UserControls>
-            {!isCollapsed && (
-              <UserMeta>
-                <span>{user?.fullName || '—'}</span>
-                <span>{user?.email}</span>
-              </UserMeta>
+          <SidebarButton
+            type="button"
+            className="desktop-only"
+            $collapsed={isCollapsed}
+            onClick={toggleCollapsed}
+            aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            {isCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+            {!isCollapsed && <span>Collapse</span>}
+          </SidebarButton>
+          <UserMenuWrap ref={userMenuRef}>
+            {userMenuOpen && (
+              <Dropdown role="menu">
+                <div className="head">{user?.email}</div>
+                <DropdownItem type="button" role="menuitem" onClick={toggleTheme}>
+                  {isDark ? <Sun size={15} /> : <Moon size={15} />}
+                  {isDark ? 'Light theme' : 'Dark theme'}
+                </DropdownItem>
+                <DropdownItem type="button" role="menuitem" className="danger" onClick={logout}>
+                  <LogOut size={15} />
+                  Sign out
+                </DropdownItem>
+              </Dropdown>
             )}
-            <LogoutButton onClick={logout} $collapsed={isCollapsed}>
-              <LogOut size={16} />
-              <span className="label">Logout</span>
-            </LogoutButton>
-          </UserControls>
+            <UserButton
+              type="button"
+              $collapsed={isCollapsed}
+              onClick={() => setUserMenuOpen((p) => !p)}
+              aria-expanded={userMenuOpen}
+              aria-haspopup="menu"
+              title={isCollapsed ? user?.fullName || user?.email : undefined}
+            >
+              <Avatar>{getInitials(user)}</Avatar>
+              <div className="info">
+                <div className="name">{user?.fullName || user?.email || 'User'}</div>
+                <div className="role">{roleLabel}</div>
+              </div>
+              <ChevronsUpDown size={14} className="chev" />
+            </UserButton>
+          </UserMenuWrap>
         </SidebarFooter>
       </Sidebar>
 
-      <ContentArea onClick={closeSidebar}>
-        <MobileHeader>
-          <Brand>
-            <BrandLogo>WP</BrandLogo>
-            <span>WorkPilot</span>
-          </Brand>
-          <MobileMenuButton onClick={() => setIsSidebarOpen((prev) => !prev)}>
-            ☰
-          </MobileMenuButton>
-        </MobileHeader>
-        <Outlet />
+      <ContentArea>
+        <TopBar>
+          <HeaderButton
+            type="button"
+            className="icon mobile-only"
+            onClick={() => setIsSidebarOpen((p) => !p)}
+            aria-label="Open menu"
+          >
+            <Menu size={16} />
+          </HeaderButton>
+          <TopTitle>
+            <h1>{page.title}</h1>
+            <span>{page.sub}</span>
+          </TopTitle>
+          <HeaderButton
+            type="button"
+            className="search"
+            onClick={() => palette.setOpen(true)}
+            aria-label="Search and commands (Ctrl+K)"
+          >
+            <Search size={14} />
+            <span className="label">Search or run a command</span>
+            <Kbd>Ctrl K</Kbd>
+          </HeaderButton>
+          <HeaderButton
+            type="button"
+            className="icon"
+            onClick={toggleTheme}
+            aria-label={isDark ? 'Switch to light theme' : 'Switch to dark theme'}
+            title={isDark ? 'Light theme' : 'Dark theme'}
+          >
+            {isDark ? <Sun size={15} /> : <Moon size={15} />}
+          </HeaderButton>
+          {canCreateTask && (
+            <PrimaryButton type="button" onClick={handleCreateTask} title="New task (N)">
+              <Plus size={15} />
+              <span className="label">New task</span>
+              <Kbd>N</Kbd>
+            </PrimaryButton>
+          )}
+        </TopBar>
+
+        <PageScroll id="main-content" tabIndex={-1}>
+          <Suspense fallback={<PageSkeleton path={location.pathname} />}>
+            <Outlet />
+          </Suspense>
+        </PageScroll>
       </ContentArea>
+
+      <CommandPalette
+        open={palette.open}
+        onClose={palette.close}
+        onCreateTask={handleCreateTask}
+      />
     </LayoutWrapper>
   );
 };
 
 export default DashboardLayout;
-
